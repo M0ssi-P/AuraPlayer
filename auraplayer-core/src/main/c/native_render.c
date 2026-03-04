@@ -11,6 +11,7 @@
     #include <jawt_md.h>
     #include <X11/Xlib.h>
 #elif __APPLE__
+    #include <jawt_md.h>
     #include <objc/runtime.h>
 #endif
 
@@ -52,8 +53,8 @@ JNIEXPORT void JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_initializeNa
                         JAWT_X11DrawingSurfaceInfo* x11_info = (JAWT_X11DrawingSurfaceInfo*)dsi->platformInfo;
                         wid = (int64_t)x11_info->drawable;
                     #elif __APPLE__
-                        JAWT_MacOSXDrawingSurfaceInfo* mac_info = (JAWT_MacOSXDrawingSurfaceInfo*)dsi->platformInfo;
-                        wid = (int64_t)mac_info->cocoaViewRef;
+                        void* view = dsi->platformInfo;  // This is NSView* for newer JJK
+                        wid = (int64_t)view;
                     #endif
 
                     if (wid != 0) {
