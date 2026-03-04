@@ -35,6 +35,8 @@ jobs:
             -Impv-dev/include `
             -I"${{ env.JAVA_HOME }}/include" `
             -I"${{ env.JAVA_HOME }}/include/win32" `
+            -L"${{ env.JAVA_HOME }}/lib" `
+            -ljawt `
             mpv-dev/libmpv.dll.a
 
           # Create directory and move artifacts
