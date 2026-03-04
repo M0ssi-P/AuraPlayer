@@ -27,15 +27,25 @@ jobs:
       - name: Compile Windows DLL
         if: matrix.os == 'windows-latest'
         run: |
+          # Download the dev kit
           curl -L -o mpv-sdk.7z https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20260304/mpv-dev-x86_64-20260304-git-c401ef9.7z
           7z x mpv-sdk.7z -ompv-dev
+
+          # Compile and LINK
+          # -L: points to the folder containing libmpv.dll.a or libmpv.lib
+          # -lmpv: tells the linker to look for 'mpv'
           gcc -shared -o native_render.dll auraplayer-core/src/main/c/native_render.c `
             -Impv-dev/include `
             -I"${{ env.JAVA_HOME }}/include" `
-            -I"${{ env.JAVA_HOME }}/include/win32"
-          # Move both to the resources folder
+            -I"${{ env.JAVA_HOME }}/include/win32" `
+            -Lmpv-dev/lib `
+            -lmpv
+
+          # Create directory and move artifacts
           mkdir -p auraplayer-core/src/main/resources/nativelibs/windows-x64
           mv native_render.dll auraplayer-core/src/main/resources/nativelibs/windows-x64/
+          
+          # Use the actual DLL from the root of the dev kit
           cp mpv-dev/libmpv-2.dll auraplayer-core/src/main/resources/nativelibs/windows-x64/
 
       # Linux Build
