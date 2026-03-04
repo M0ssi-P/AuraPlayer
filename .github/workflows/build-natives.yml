@@ -50,12 +50,20 @@ jobs:
       - name: Compile Linux SO
         if: matrix.os == 'ubuntu-latest'
         run: |
-          sudo apt-get update && sudo apt-get install -y libmpv-dev
-          gcc -shared -fPIC -o native_render.so auraplayer-core/src/main/c/native_render.c -I/usr/include/mpv -I${{ env.JAVA_HOME }}/include -I${{ env.JAVA_HOME }}/include/linux
+          # Install the MPV development headers and library
+          sudo apt-get update
+          sudo apt-get install -y libmpv-dev
+          gcc -fPIC -shared -o libnative_render.so auraplayer-core/src/main/c/native_render.c \
+            -I"${{ env.JAVA_HOME }}/include" \
+            -I"${{ env.JAVA_HOME }}/include/linux" \
+            -L"${{ env.JAVA_HOME }}/lib" \
+            -ljawt \
+            -lmpv
+          
           mkdir -p auraplayer-core/src/main/resources/nativelibs/linux-x64
           mv native_render.so auraplayer-core/src/main/resources/nativelibs/linux-x64/
           # Copy system libmpv to our resources
-          cp /usr/lib/x86_64-linux-gnu/libmpv.so.2 auraplayer-core/src/main/resources/nativelibs/linux-x64/libmpv.so
+          cp /usr/lib/x86_64-linux-gnu/libmpv.so* auraplayer-core/src/main/resources/nativelibs/linux-x64/
 
       # MacOS Build
       - name: Compile MacOS Dylib
