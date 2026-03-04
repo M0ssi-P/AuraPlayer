@@ -1,0 +1,20 @@
+[versions]
+serilization = "1.8.1"
+sp = "2.1.20"
+nicehttp = "0.4.13"
+okhttp3 = "4.12.0"
+scope = "1.10.2"
+gson = "2.13.1"
+ffmpeg = "8.0.1-1.5.13"
+
+[libraries]
+kotlinx-serilization = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serilization"}
+nicehttp = { group = "com.github.Blatzar", name = "NiceHttp", version.ref = "nicehttp"}
+okhttp3 = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp3"}
+kotlinx-coroutines-swing = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-swing", version.ref = "scope"}
+google-gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson"}
+ffmpeg = { group = "org.bytedeco", name = "ffmpeg-platform", version.ref = "ffmpeg"}
+
+
+[plugins]
+kotlinx-serilization-pg = { id = "plugin.serialization", version.ref = "sp" }

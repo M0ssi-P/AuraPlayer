@@ -1,0 +1,71 @@
+name: Build Multi-Platform Natives
+on: [push]
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows-x64
+          - os: ubuntu-latest
+            platform: linux-x64
+          - os: macos-latest
+            platform: macos-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      # Windows Build
+      - name: Compile Windows DLL
+        if: matrix.os == 'windows-latest'
+        run: |
+          curl -L -o mpv-sdk.7z https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20260304/mpv-dev-x86_64-20260304-git-c401ef9.7z
+          7z x mpv-sdk.7z -oinclude/mpv
+          gcc -shared -o native_render.dll auraplayer-core/src/main/c/native_render.c -Iinclude/mpv -I${{ env.JAVA_HOME }}/include -I${{ env.JAVA_HOME }}/include/win32
+          # Move both to the resources folder
+          mkdir -p auraplayer-core/src/main/resources/nativelibs/windows-x64
+          mv native_render.dll auraplayer-core/src/main/resources/nativelibs/windows-x64/
+          cp include/mpv/libmpv-2.dll auraplayer-core/src/main/resources/nativelibs/windows-x64/
+
+      # Linux Build
+      - name: Compile Linux SO
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update && sudo apt-get install -y libmpv-dev
+          gcc -shared -fPIC -o native_render.so auraplayer-core/src/main/c/native_render.c -I/usr/include/mpv -I${{ env.JAVA_HOME }}/include -I${{ env.JAVA_HOME }}/include/linux
+          mkdir -p auraplayer-core/src/main/resources/nativelibs/linux-x64
+          mv native_render.so auraplayer-core/src/main/resources/nativelibs/linux-x64/
+          # Copy system libmpv to our resources
+          cp /usr/lib/x86_64-linux-gnu/libmpv.so.2 auraplayer-core/src/main/resources/nativelibs/linux-x64/libmpv.so
+
+      # MacOS Build
+      - name: Compile MacOS Dylib
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew install mpv
+          clang -shared -o native_render.dylib auraplayer-core/src/main/c/native_render.c -I$(brew --prefix mpv)/include -I${{ env.JAVA_HOME }}/include -I${{ env.JAVA_HOME }}/include/darwin
+          mkdir -p auraplayer-core/src/main/resources/nativelibs/macos-arm64
+          mv native_render.dylib auraplayer-core/src/main/resources/nativelibs/macos-arm64/
+          cp $(brew --prefix mpv)/lib/libmpv.dylib auraplayer-core/src/main/resources/nativelibs/macos-arm64/
+
+      - name: Prepare Resources
+        run: |
+          mkdir -p auraplayer-core/src/main/resources/nativelibs/${{ matrix.platform }}
+          mv native_render.* auraplayer-core/src/main/resources/nativelibs/${{ matrix.platform }}/
+
+      - name: Build Fat JAR
+        run: ./gradlew :auraplayer-core:jar
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: AuraPlayer-Core-${{ matrix.platform }}
+          path: auraplayer-core/build/libs/*.jar
