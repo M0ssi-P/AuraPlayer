@@ -58,9 +58,7 @@ jobs:
             -lmpv
           
           mkdir -p auraplayer-core/src/main/resources/nativelibs/linux-x64
-          mv native_render.so auraplayer-core/src/main/resources/nativelibs/linux-x64/
-          # Copy system libmpv to our resources
-          cp /usr/lib/x86_64-linux-gnu/libmpv.so* auraplayer-core/src/main/resources/nativelibs/linux-x64/
+          mv libnative_render.so auraplayer-core/src/main/resources/nativelibs/linux-x64/
 
       # MacOS Build
       - name: Compile MacOS Dylib
