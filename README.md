@@ -1,53 +1,97 @@
 # AuraPlayer
 
-**AuraPlayer** is a high-performance **cross-platform desktop media playback engine written in Kotlin** that uses **JNI and JAWT** to bridge the JVM with native GPU-accelerated rendering.
+**AuraPlayer** is a high-performance **cross-platform desktop media playback engine written in Kotlin**.  
+It uses **JNI and JAWT** to bridge the JVM with native GPU-accelerated rendering, allowing video frames to be drawn directly to desktop UI surfaces.
 
-It allows **hardware-accelerated audio and video playback directly inside Java/Swing components** by rendering frames to a native drawing surface obtained through the **Java AWT Native Interface (JAWT)**.
+AuraPlayer supports **both audio and video playback** and is designed to be embedded into JVM desktop applications while maintaining **hardware-accelerated performance**.
 
-AuraPlayer was created to address a gap in the JVM ecosystem: there was no modern desktop media engine comparable in capability to mobile players like ExoPlayer while still integrating cleanly with traditional desktop UI frameworks.
+The project was created to fill a gap in the JVM ecosystem: there was no modern desktop media engine comparable in capability to players like ExoPlayer while still integrating cleanly with desktop UI frameworks.
 
 ---
 
 # Features
 
-## GPU-Accelerated Video Rendering
+## GPU-Accelerated Video Playback
 
 - Hardware-accelerated decoding
-- GPU frame rendering
+- GPU rendering pipeline
 - Smooth high-resolution playback
-- Reduced CPU overhead
+- Reduced CPU usage
 
 ## JNI Native Bridge
 
-AuraPlayer uses **JNI** to communicate between:
+AuraPlayer uses **JNI** to connect the Kotlin/JVM API with a native media backend.
 
-- Kotlin/JVM playback API
-- Native media pipeline
-- GPU rendering backend
+This bridge handles:
 
-This architecture enables native performance while keeping a clean Kotlin API.
+- Media decoding
+- Frame rendering
+- Surface communication
+- Performance-critical operations
 
-## Direct JAWT Surface Rendering
+## JAWT Surface Rendering
 
-Using **JAWT**, AuraPlayer can:
+AuraPlayer uses **JAWT (Java AWT Native Interface)** to obtain native drawing surfaces from Java UI components.
 
-- Access the **native drawing surface of AWT/Swing components**
-- Render video frames directly to `Nativee Drawing Surface`
-- Avoid heavyweight window embedding or external players
-- Maintain seamless integration with existing Java desktop apps
+This enables:
 
-## Audio + Video Playback
+- Rendering directly into `JPanel`
+- Tight integration with desktop UIs
+- No external windows or embedded players
+- Smooth GPU-accelerated rendering
 
-Supports both:
+## Audio + Video Support
+
+AuraPlayer supports:
 
 - Video playback with synchronized audio
-- Audio-only media playback
-- Most common media container formats
+- Audio-only playback
+- Most common media containers and codecs  
+*(depending on native backend support)*
 
-*(Exact format support depends on the native codec layer used.)*
+---
+
+# Modules
+
+AuraPlayer is split into **two modules** to allow flexibility depending on how you want to integrate it.
+
+## `auraplayer-core`
+
+The **core playback engine**.
+
+This module contains:
+
+- Media playback engine
+- JNI bridge
+- Native rendering integration
+- Audio/video decoding pipeline
+
+It **does not depend on any UI framework**, making it usable with:
+
+- Swing
+- JavaFX
+- Compose Desktop
+- LWJGL
+- custom rendering environments
+
+This is the module to use if you want **full control over UI integration**.
+
+---
+
+## `auraplayer-compose`
+
+A **ready-to-use module for Compose Desktop applications**.
+
+It includes:
+
+- `auraplayer-core`
+- Compose UI components
+- media player controls
+- video surface composables
+
+This module lets you quickly build a media player UI using **Jetpack Compose for Desktop**.
 
 ---
 
 # Architecture
 
-AuraPlayer is structured as three main layers:
