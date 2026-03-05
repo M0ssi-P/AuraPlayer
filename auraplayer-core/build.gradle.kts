@@ -1,5 +1,6 @@
 val nativeSrcDir = File(projectDir, "src/main/c")
 val nativeResDir = File(projectDir, "src/main/resources/nativelibs")
+val isCI = System.getenv("GITHUB_ACTIONS") == "true"
 
 plugins {
     `maven-publish`
@@ -38,6 +39,8 @@ publishing {
 val compileNative by tasks.registering(Exec::class) {
     description = "Compiles the C JNI bridge for the current OS."
     group = "build"
+
+    onlyIf { !isCI }
 
     val jdkHome = System.getProperty("java.home")
     val os = org.gradle.internal.os.OperatingSystem.current()
