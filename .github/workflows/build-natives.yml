@@ -67,13 +67,17 @@ jobs:
           brew install mpv
           
           JAWT_PATH=$(find "${{ env.JAVA_HOME }}" -name "libjawt.dylib" -exec dirname {} \;)
-          echo "JAWT directory found at: $JAWT_PATH"
+          BREW_PATH=$(brew --prefix)
+          echo "JAWT found at: $JAWT_PATH"
+          echo "Homebrew found at: $BREW_PATH"
           
           clang -dynamiclib -o libnative_render.dylib auraplayer-core/src/main/c/native_render.c \
             -I"${{ env.JAVA_HOME }}/include" \
             -I"${{ env.JAVA_HOME }}/include/darwin" \
+            -I"$BREW_PATH/include" \
             -L"$JAWT_PATH" \
             -L"${{ env.JAVA_HOME }}/lib" \
+            -L"$BREW_PATH/lib" \
             -ljawt -lmpv \
             -framework AppKit \
             -framework QuartzCore \
