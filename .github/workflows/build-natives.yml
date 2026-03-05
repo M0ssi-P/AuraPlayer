@@ -71,8 +71,8 @@ jobs:
             -I${{ env.JAVA_HOME }}/include \
             -I${{ env.JAVA_HOME }}/include/darwin \
             -L$(brew --prefix mpv)/lib \
-            -lmpv \
-            -framework JavaVM
+            -ljawt -lmpv \
+            -framework AppKit -framework QuartzCore -framework Foundation
           mkdir -p auraplayer-core/src/main/resources/nativelibs/macos-arm64
           mv native_render.dylib auraplayer-core/src/main/resources/nativelibs/macos-arm64/
           cp $(brew --prefix mpv)/lib/libmpv.dylib auraplayer-core/src/main/resources/nativelibs/macos-arm64/
