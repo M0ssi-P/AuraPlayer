@@ -102,11 +102,16 @@ tasks.processResources {
 }
 
 tasks.withType<Jar> {
-    dependsOn(compileNative)
-    dependsOn(copyMpvBinaries)
-    from("src/main/resources") {
-        include("nativelibs/**")
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    if (!isCI) {
+        dependsOn(compileNative)
+        dependsOn(copyMpvBinaries)
     }
+
+//    from("src/main/resources") {
+//        include("nativelibs/**")
+//    }
 }
 
 
