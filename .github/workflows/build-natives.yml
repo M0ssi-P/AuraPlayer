@@ -65,17 +65,23 @@ jobs:
         if: matrix.os == 'macos-latest'
         run: |
           brew install mpv
-          clang -shared -o native_render.dylib \
-            auraplayer-core/src/main/c/native_render.c \
-            -I$(brew --prefix mpv)/include \
-            -I${{ env.JAVA_HOME }}/include \
-            -I${{ env.JAVA_HOME }}/include/darwin \
-            -L$(brew --prefix mpv)/lib \
+          
+          JAWT_PATH=$(find "${{ env.JAVA_HOME }}" -name "libjawt.dylib" -exec dirname {} \;)
+          echo "JAWT directory found at: $JAWT_PATH"
+          
+          clang -dynamiclib -o libnative_render.dylib auraplayer-core/src/main/c/native_render.c \
+            -I"${{ env.JAVA_HOME }}/include" \
+            -I"${{ env.JAVA_HOME }}/include/darwin" \
+            -L"$JAWT_PATH" \
+            -L"${{ env.JAVA_HOME }}/lib" \
             -ljawt -lmpv \
-            -framework AppKit -framework QuartzCore -framework Foundation
-          mkdir -p auraplayer-core/src/main/resources/nativelibs/macos-arm64
-          mv native_render.dylib auraplayer-core/src/main/resources/nativelibs/macos-arm64/
-          cp $(brew --prefix mpv)/lib/libmpv.dylib auraplayer-core/src/main/resources/nativelibs/macos-arm64/
+            -framework AppKit \
+            -framework QuartzCore \
+            -framework Foundation \
+            -arch arm64
+          
+          mkdir -p auraplayer-core/src/main/resources/nativelibs/macos-x64
+          mv libnative_render.dylib auraplayer-core/src/main/resources/nativelibs/macos-x64/
 
       - name: Make Gradle Wrapper Executable
         run: chmod +x gradlew
