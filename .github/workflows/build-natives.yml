@@ -1,19 +1,16 @@
-name: Build Multi-Platform Natives
-on: [push]
+name: Build Multi-Platform Natives abd Release
+on:
+  push:
+    tags:
+      - 'v*'
 
 jobs:
-  build:
+  build-and-publish:
     name: Build on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        include:
-          - os: windows-latest
-            platform: windows-x64
-          - os: ubuntu-latest
-            platform: linux-x64
-          - os: macos-latest
-            platform: macos-arm64
+        os: [windows-latest, ubuntu-latest, macos-latest]
 
     steps:
       - uses: actions/checkout@v4
@@ -93,8 +90,47 @@ jobs:
       - name: Build Fat JAR
         run: ./gradlew :auraplayer-core:jar
 
-      - name: Upload Artifacts
+      - name: Upload Native Binary to Workflow
         uses: actions/upload-artifact@v4
         with:
-          name: AuraPlayer-Core-${{ matrix.platform }}
-          path: auraplayer-core/build/libs/*.jar
+          name: native-${{ matrix.os }}
+          path: auraplayer-core/src/main/resources/nativelibs/
+
+  publish:
+    needs: build-and-publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      # 1. Download ALL binaries from the previous jobs
+      - name: Download all natives
+        uses: actions/download-artifact@v4
+        with:
+          path: auraplayer-core/src/main/resources/nativelibs/
+          merge-multiple: true
+
+      # 2. Final Publish
+      - name: Publish to GitHub Packages
+        run: ./gradlew publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # This automatically lists PRs and contributors
+          generate_release_notes: true
+           # Attaches your Fat JARs so people can download them manually
+          files: |
+            auraplayer-core/build/libs/*.jar
+            auraplayer-compose/build/libs/*.jar
+        env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

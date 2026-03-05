@@ -46,6 +46,23 @@ publishing {
             groupId = "com.mossip"
             artifactId = "auraplayer-compose"
             version = auraVersion
+
+            pom {
+                name.set("AuraPlayer Compose")
+                description.set("High-performance JNI/libmpv video engine for Kotlin/Compose")
+                url.set("https://github.com/M0ssi-P/AuraPlayer")
+            }
+        }
+    }
+
+    repositories {
+        maven {
+            name = "GitHubPackages"
+            url = uri("https://maven.pkg.github.com/M0ssi-P/AuraPlayer")
+            credentials {
+                username = System.getenv("GITHUB_ACTOR")
+                password = System.getenv("GITHUB_TOKEN")
+            }
         }
     }
 }
