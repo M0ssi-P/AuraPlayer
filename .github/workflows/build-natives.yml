@@ -117,6 +117,9 @@ jobs:
           path: auraplayer-core/src/main/resources/nativelibs/
           merge-multiple: true
 
+      - name: Make Gradle Wrapper Executable
+        run: chmod +x gradlew
+
       # 2. Final Publish
       - name: Publish to GitHub Packages
         run: ./gradlew publish
