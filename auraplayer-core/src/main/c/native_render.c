@@ -53,7 +53,7 @@ JNIEXPORT void JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_initializeNa
                         JAWT_X11DrawingSurfaceInfo* x11_info = (JAWT_X11DrawingSurfaceInfo*)dsi->platformInfo;
                         wid = (int64_t)x11_info->drawable;
                     #elif __APPLE__
-                        void* view = dsi->platformInfo;  // This is NSView* for newer JJK
+                        void* view = dsi->platformInfo;
                         wid = (int64_t)view;
                     #endif
 
