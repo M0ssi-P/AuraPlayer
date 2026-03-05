@@ -132,8 +132,58 @@ GPU Frame Output
 ## Using Core with Swing
 
 ```kotlin
+@Composable
+fun AuraPlayerSurface(
+    auraPlayer: AuraPlayer,
+    audioOnly: Boolean = false,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit = {}
+) {
+    // Observe initialization state from the player
+    val isInitialized by auraPlayer.isInitialized.collectAsState()
+
+    // Native drawing surface used by JAWT
+    val canvas = remember {
+        Canvas().apply {
+            background = java.awt.Color.BLACK
+        }
+    }
+
+    Box(modifier) {
+
+        // Compose → Swing bridge
+        SwingPanel(
+            background = Color.Black,
+            factory = {
+                canvas
+            },
+            update = {
+                // Ensure the component has a valid native surface
+                if (canvas.isDisplayable && canvas.graphicsConfiguration != null) {
+                    if (!isInitialized) {
+                        auraPlayer.initialize(canvas, audioOnly)
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+
+        // Optional overlay content
+        // Useful for player controls, subtitles, UI overlays, etc.
+        content()
+    }
+}
+```
+
+## In Desktop Compose
+You just call in `auraplayer-compose` which already provides `AuraPlayerSurface`
+This is how you implement it.
+
+```kotlin
+// MUST use Remember to prevent recreation upon recomposition.
 val engine = remember { AuraPlayer() }
 
-AuraPlayerSurface(
-    playerInfo = engine
+AuraPlayerSurface( 
+    player = engine,
 )
+```
