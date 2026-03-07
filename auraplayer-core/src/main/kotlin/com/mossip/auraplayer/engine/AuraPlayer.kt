@@ -48,7 +48,7 @@ class AuraPlayer {
     val isInitialized = _isInitialized.asStateFlow()
 
     private val _duration = MutableStateFlow(0.0)
-    val duration = _isInitialized.asStateFlow()
+    val duration = _duration.asStateFlow()
     var initialPlayerState: InitialPlayerState =InitialPlayerState.LOADED
 
     init {
