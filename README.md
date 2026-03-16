@@ -96,22 +96,19 @@ This module lets you quickly build a media player UI using **Jetpack Compose for
 # Architecture
 
 AuraPlayer
-│
-├─ auraplayer-core
-│ ├─ Kotlin Playback API
-│ ├─ Media Control (play/pause/seek)
-│ ├─ JNI Bridge
-│ └─ Native Rendering Integration
-│
-├─ auraplayer-compose
-│ ├─ Compose Desktop UI
-│ ├─ Player Components
-│ └─ UI Controls
-│
-└─ Native Layer
-├─ Hardware Decoding
-├─ GPU Rendering
-└─ Codec Pipeline
+├── auraplayer-core
+│   ├── Kotlin Playback API
+│   ├── Media Control (play/pause/seek)
+│   ├── JNI Bridge
+│   └── Native Rendering Integration
+├── auraplayer-compose
+│   ├── Compose Desktop UI
+│   ├── Player Components
+│   └── UI Controls
+└── Native Layer
+    ├── Hardware Decoding
+    ├── GPU Rendering
+    └── Codec Pipeline
 
 Rendering flow:
 
