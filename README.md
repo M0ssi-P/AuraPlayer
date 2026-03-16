@@ -95,6 +95,7 @@ This module lets you quickly build a media player UI using **Jetpack Compose for
 
 # Architecture
 
+```mermaid
 flowchart TD
     AuraPlayer["AuraPlayer"]
 
@@ -130,6 +131,7 @@ JNI Bridge
 Native Renderer
 ↓
 GPU Frame Output
+```
 
 ---
 
