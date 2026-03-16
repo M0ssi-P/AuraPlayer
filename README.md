@@ -119,6 +119,7 @@ flowchart TD
     Native --> HWDecode["Hardware Decoding"]
     Native --> GPU["GPU Rendering"]
     Native --> Codec["Codec Pipeline"]
+```
 
 Rendering flow:
 
@@ -131,7 +132,6 @@ JNI Bridge
 Native Renderer
 ↓
 GPU Frame Output
-```
 
 ---
 
