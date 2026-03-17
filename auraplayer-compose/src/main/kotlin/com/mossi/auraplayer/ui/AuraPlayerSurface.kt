@@ -21,7 +21,6 @@ import java.awt.Canvas
 @Composable
 fun AuraPlayerSurface(auraPlayer: AuraPlayer, audioOnly: Boolean = false, modifier: Modifier = Modifier, content: @Composable () -> Unit = {}) {
     val isInitialized by auraPlayer.isInitialized.collectAsState()
-    val playerState by auraPlayer.playerState.collectAsState()
     val canvas = remember { Canvas().apply {
         background = java.awt.Color.BLACK
     } }
@@ -36,7 +35,6 @@ fun AuraPlayerSurface(auraPlayer: AuraPlayer, audioOnly: Boolean = false, modifi
                 if (canvas.isDisplayable && canvas.graphicsConfiguration != null) {
                     if (!isInitialized) {
                         auraPlayer.initialize(canvas, audioOnly)
-                        auraPlayer.loadFile("https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8")
                     }
                 }
             },
