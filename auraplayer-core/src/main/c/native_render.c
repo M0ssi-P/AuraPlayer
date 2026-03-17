@@ -2,6 +2,8 @@
 #include <jawt.h>
 #include <mpv/client.h>
 #include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
 
 // Platform-specific headers for JAWT
 #ifdef _WIN32
