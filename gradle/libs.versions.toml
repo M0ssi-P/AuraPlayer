@@ -6,6 +6,7 @@ okhttp3 = "4.12.0"
 scope = "1.10.2"
 gson = "2.13.1"
 ffmpeg = "8.0.1-1.5.13"
+annotationJvm = "1.9.1"
 
 [libraries]
 kotlinx-serilization = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serilization"}
@@ -14,6 +15,7 @@ okhttp3 = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okht
 kotlinx-coroutines-swing = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-swing", version.ref = "scope"}
 google-gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson"}
 ffmpeg = { group = "org.bytedeco", name = "ffmpeg-platform", version.ref = "ffmpeg"}
+annotation-jvm = { group = "androidx.annotation", name = "annotation-jvm", version.ref = "annotationJvm" }
 
 
 [plugins]

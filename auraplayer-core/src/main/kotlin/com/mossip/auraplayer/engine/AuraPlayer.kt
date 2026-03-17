@@ -4,10 +4,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.awt.Canvas
 
@@ -41,37 +39,88 @@ class AuraPlayer {
     private val _currentTime = MutableStateFlow(0.0)
     val currentTime = _currentTime.asStateFlow()
 
+    private val _bufferDuration = MutableStateFlow(0.0)
+    val bufferDuration = _bufferDuration.asStateFlow()
+
     private val _audioLevels = MutableStateFlow(doubleArrayOf(0.0, 0.0))
     val audioLevels = _audioLevels.asStateFlow()
 
     private val _isInitialized = MutableStateFlow(false)
     val isInitialized = _isInitialized.asStateFlow()
 
+    private val _playerState = MutableStateFlow(PlayerState.IDLE)
+    val playerState = _playerState.asStateFlow()
+
+    private val _tracks = MutableStateFlow<List<MediaTrack>>(emptyList())
+    val tracks = _tracks.asStateFlow()
+
     private val _duration = MutableStateFlow(0.0)
     val duration = _duration.asStateFlow()
-    var initialPlayerState: InitialPlayerState =InitialPlayerState.LOADED
+
+    private val _volume = MutableStateFlow(100.0)
+    val volume = _volume.asStateFlow()
+
+    private val _isMuted = MutableStateFlow(false)
+    val isMuted = _isMuted.asStateFlow()
+
+    private val _speed = MutableStateFlow(1.0)
+    val speed = _speed.asStateFlow()
 
     init {
         AuraPlayerLoader.load()
-        playerScope.launch {
-            while (isActive) {
-                if (isInitialized.value) {
-                    updateTime()
-                }
-                delay(500)
-            }
+    }
+
+    fun onNativeTimeChange(time: Double) {
+        _currentTime.value = time
+    }
+
+    fun onNativeDurationChange(duration: Double) {
+        _duration.value = duration
+    }
+
+    fun onNativeVolumeChange(v: Double) { _volume.value = v }
+    fun onNativeMuteChange(m: Boolean) { _isMuted.value = m }
+    fun onNativeSpeedChange(s: Double) { _speed.value = s }
+
+    fun onNativeStateChange(stateInt: Int) {
+        _playerState.value = when(stateInt) {
+            0 -> PlayerState.PLAYING
+            1 -> PlayerState.PAUSED
+            2 -> PlayerState.STOPPED
+            3 -> PlayerState.IDLE
+            4 -> PlayerState.LOADING
+            5 -> PlayerState.SEEKING
+            6 -> PlayerState.BUFFERING
+            else -> PlayerState.IDLE
         }
     }
+
+    fun onNativeTracksChanged() {
+        playerScope.launch {
+            val newTracks = getNativeTracks()?.toList() ?: emptyList()
+            _tracks.value = newTracks
+        }
+    }
+
+    fun onNativeBufferChange(duration: Double) {
+        _bufferDuration.value = duration
+    }
+
+    private external fun getBufferDuration(): Double
+
+    private external fun getNativeTracks(): Array<MediaTrack>?
+
     private external fun initializeNative(canvas: Canvas, audioOnly: Boolean)
     private external fun getAudioLevels(): DoubleArray
     external fun loadFile(url: String)
 
     fun initialize(canvas: Canvas, audioOnly: Boolean) {
-        if(!isInitialized.value) {
+        if(!_isInitialized.value) {
             initializeNative(canvas, audioOnly)
             _isInitialized.value = true
         }
     }
+
     external fun setPause(pause: Boolean)
     private external fun setPropertyDouble(name: String, value: Double)
     private external fun getPropertyDouble(name: String): Double
@@ -81,19 +130,11 @@ class AuraPlayer {
     private external fun terminateNative()
 
     fun setVolume(v: Double) = setPropertyDouble("volume", v)
+    fun getVolume() = getPropertyDouble("volume")
     fun seek(seconds: Double) = setPropertyDouble("time-pos", seconds)
-    fun getDuration(): Double = getPropertyDouble("duration")
-    fun getTimePos(): Double = getPropertyDouble("time-pos")
+    fun setSpeed(speed: Double) = setPropertyDouble("speed", speed)
 
-    fun switchTrack(type: String, id: String) {
-        // type: "vid", "aid", or "sid"
-        setTrack(type, id)
-    }
-
-    fun updateTime() {
-        _currentTime.value = getTimePos()
-        _duration.value = getDuration()
-    }
+    external fun setMute(mute: Boolean)
 
 //    fun setPreferredQuality(height: Int) {
 //        // Example: "bestvideo[height<=1080]+bestaudio/best[height<=1080]"
