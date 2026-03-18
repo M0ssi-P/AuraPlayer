@@ -142,8 +142,12 @@ fun getCurrentPlatform(): String {
 }
 
 tasks.processResources {
-    dependsOn(copyMpvBinaries)
-    dependsOn(compileNative)
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    if (!isCI) {
+        dependsOn(compileNative)
+        dependsOn(copyMpvBinaries)
+    }
 }
 
 tasks.withType<Jar> {
