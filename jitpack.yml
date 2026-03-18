@@ -10,8 +10,8 @@ install:
 
   - ls -lh *.jar
 
-  - mvn install:install-file -Dfile=core.jar -DgroupId=com.github.M0ssi-P.AuraPlayer -DartifactId=auraplayer-core -Dversion=${VERSION} -Dpackaging=jar
-  - mvn install:install-file -Dfile=compose.jar -DgroupId=com.github.M0ssi-P.AuraPlayer -DartifactId=auraplayer-compose -Dversion=${VERSION} -Dpackaging=jar
+  - mvn install:install-file -Dfile=core.jar -DgroupId=com.github.m0ssi-p.auraplayer -DartifactId=auraplayer-core -Dversion=${VERSION} -Dpackaging=jar
+  - mvn install:install-file -Dfile=compose.jar -DgroupId=com.github.m0ssi-p.auraplayer -DartifactId=auraplayer-compose -Dversion=${VERSION} -Dpackaging=jar
 
 build:
   - echo "Multi-module artifacts installed from release."
