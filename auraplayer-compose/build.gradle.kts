@@ -8,8 +8,9 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val auraVersion = project.properties["aura_version"] as String
 group = "auraplayer-compose"
-version = "1.0-SNAPSHOT"
+version = auraVersion
 
 repositories {
     mavenCentral()
@@ -37,13 +38,12 @@ kotlin {
         languageVersion = JavaLanguageVersion.of(jdkLevel)
     }
 }
-val auraVersion = project.properties["aura_version"] as String
 
 publishing {
     publications {
         create<MavenPublication>("maven") {
             from(components["java"])
-            groupId = "com.mossip"
+            groupId = "io.github.m0ssi-p"
             artifactId = "auraplayer-compose"
             version = auraVersion
 
@@ -51,17 +51,22 @@ publishing {
                 name.set("AuraPlayer Compose")
                 description.set("High-performance JNI/libmpv video engine for Kotlin/Compose")
                 url.set("https://github.com/M0ssi-P/AuraPlayer")
-            }
-        }
-    }
-
-    repositories {
-        maven {
-            name = "GitHubPackages"
-            url = uri("https://maven.pkg.github.com/M0ssi-P/AuraPlayer")
-            credentials {
-                username = System.getenv("GITHUB_ACTOR")
-                password = System.getenv("GITHUB_TOKEN")
+                licenses {
+                    license {
+                        name.set("MIT License")
+                        url.set("https://opensource.org/licenses/MIT")
+                    }
+                }
+                developers {
+                    developer {
+                        id.set("M0ssi-P")
+                        name.set("Pacifique Mossi")
+                    }
+                }
+                scm {
+                    connection.set("scm:git:github.com/M0ssi-P/AuraPlayer.git")
+                    url.set("https://github.com/M0ssi-P/AuraPlayer")
+                }
             }
         }
     }

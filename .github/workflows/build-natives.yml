@@ -116,8 +116,19 @@ jobs:
           path: auraplayer-core/src/main/resources/nativelibs/
           merge-multiple: true
 
+      - name: Debug - List Resource Folder
+        run: ls -R auraplayer-core/src/main/resources/nativelibs/
+
       - name: Make Gradle Wrapper Executable
         run: chmod +x gradlew
+
+      - name: Publish to Maven Central (Sonatype)
+        run: ./gradlew publishToSonatype -Paura_version=${{ github.ref_name }} closeAndReleaseSonatypeStagingRepository
+        env:
+            SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+            SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
+            GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+            GPG_PASSWORD: ${{ secrets.GPG_PASSWORD }}
 
       - name: Publish to GitHub Packages
         run: ./gradlew publish
