@@ -1,0 +1,18 @@
+jdk:
+  - openjdk21
+
+before_install:
+  - echo "Skipping standard build. Fetching pre-built artifacts from GitHub Release..."
+
+install:
+  - CORE_JAR="auraplayer-core-1.0-SNAPSHOT.jar"
+  - COMPOSE_JAR="auraplayer-compose-1.0-SNAPSHOT.jar"
+
+  - curl -L "https://github.com/${GROUP}/${ARTIFACT}/releases/download/${VERSION}/${CORE_JAR}" -o ${CORE_JAR}
+  - curl -L "https://github.com/${GROUP}/${ARTIFACT}/releases/download/${VERSION}/${COMPOSE_JAR}" -o ${COMPOSE_JAR}
+
+  - mvn install:install-file -Dfile=${CORE_JAR} -DgroupId=com.github.${GROUP}.${ARTIFACT} -DartifactId=auraplayer-core -Dversion=${VERSION} -Dpackaging=jar
+  - mvn install:install-file -Dfile=${COMPOSE_JAR} -DgroupId=com.github.${GROUP}.${ARTIFACT} -DartifactId=auraplayer-compose -Dversion=${VERSION} -Dpackaging=jar
+
+build:
+  - echo "Multi-module artifacts installed from release."

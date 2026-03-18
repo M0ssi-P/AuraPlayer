@@ -110,7 +110,6 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      # 1. Download ALL binaries from the previous jobs
       - name: Download all natives
         uses: actions/download-artifact@v4
         with:
@@ -120,7 +119,6 @@ jobs:
       - name: Make Gradle Wrapper Executable
         run: chmod +x gradlew
 
-      # 2. Final Publish
       - name: Publish to GitHub Packages
         run: ./gradlew publish
         env:
@@ -129,9 +127,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          # This automatically lists PRs and contributors
           generate_release_notes: true
-           # Attaches your Fat JARs so people can download them manually
           files: |
             auraplayer-core/build/libs/*.jar
             auraplayer-compose/build/libs/*.jar
