@@ -6,7 +6,7 @@ plugins {
     java
 }
 
-group = "com.auraplayer"
+group = "io.github.m0ssi-p"
 version = project.properties["aura_version"] as String
 
 repositories {

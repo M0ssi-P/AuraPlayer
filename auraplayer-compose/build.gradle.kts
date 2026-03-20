@@ -8,8 +8,8 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+group = "io.github.m0ssi-p"
 val auraVersion = project.properties["aura_version"] as String
-group = "auraplayer-compose"
 version = auraVersion
 
 repositories {
@@ -37,6 +37,11 @@ kotlin {
     jvmToolchain {
         languageVersion = JavaLanguageVersion.of(jdkLevel)
     }
+}
+
+java {
+    withSourcesJar()
+    withJavadocJar()
 }
 
 publishing {

@@ -8,9 +8,8 @@ plugins {
     id("java-library")
 }
 
+group = "io.github.m0ssi-p"
 val auraVersion = project.properties["aura_version"] as String
-
-group = "auraplayer-core"
 version = auraVersion
 
 repositories {
@@ -34,14 +33,9 @@ sourceSets {
     }
 }
 
-val sourcesJar by tasks.registering(Jar::class) {
-    archiveClassifier.set("sources")
-    from(sourceSets.main.get().allSource)
-}
-
-val javadocJar by tasks.registering(Jar::class) {
-    archiveClassifier.set("javadoc")
-    from(tasks.javadoc)
+java {
+    withSourcesJar()
+    withJavadocJar()
 }
 
 publishing {
@@ -61,8 +55,6 @@ publishing {
             groupId = "io.github.m0ssi-p"
             artifactId = "auraplayer-core"
             version = auraVersion
-            artifact(sourcesJar)
-            artifact(javadocJar)
 
             pom {
                 name.set("AuraPlayer Core")
@@ -161,7 +153,6 @@ tasks.processResources {
 }
 
 tasks.withType<Jar> {
-    from(sourceSets.main.get().output)
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
     if (!isCI) {
@@ -169,9 +160,9 @@ tasks.withType<Jar> {
         dependsOn(copyMpvBinaries)
     }
 
-//    from("src/main/resources") {
-//        include("nativelibs/**")
-//    }
+    from("src/main/resources") {
+        include("nativelibs/**")
+    }
 }
 
 
