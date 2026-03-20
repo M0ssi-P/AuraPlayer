@@ -1,9 +1,12 @@
+import com.vanniktech.maven.publish.SonatypeHost
+
 val nativeSrcDir = File(projectDir, "src/main/c")
 val nativeResDir = File(projectDir, "src/main/resources/nativelibs")
 val isCI = System.getenv("GITHUB_ACTIONS") == "true"
 
 plugins {
     `maven-publish`
+    id("com.vanniktech.maven.publish") version "0.28.0"
     kotlin("jvm")
     id("java-library")
 }
@@ -33,52 +36,37 @@ sourceSets {
     }
 }
 
-java {
-    withSourcesJar()
-    withJavadocJar()
-}
+mavenPublishing {
+    coordinates(
+        groupId = group as String,
+        artifactId = "auraplayer-core",
+        version = version as String
+    )
 
-publishing {
-    repositories {
-        maven {
-            name = "Sonatype"
-            url = uri("https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/")
-            credentials {
-                username = System.getenv("SONATYPE_USERNAME")
-                password = System.getenv("SONATYPE_PASSWORD")
+    pom {
+        name.set("AuraPlayer Core")
+        description.set("High-performance JNI/libmpv video engine for Kotlin/Compose")
+        url.set("https://github.com/M0ssi-P/AuraPlayer")
+        licenses {
+            license {
+                name.set("MIT License")
+                url.set("https://opensource.org/licenses/MIT")
             }
         }
-    }
-    publications {
-        create<MavenPublication>("maven") {
-            from(components["java"])
-            groupId = "io.github.m0ssi-p"
-            artifactId = "auraplayer-core"
-            version = auraVersion
-
-            pom {
-                name.set("AuraPlayer Core")
-                description.set("High-performance JNI/libmpv video engine for Kotlin/Compose")
-                url.set("https://github.com/M0ssi-P/AuraPlayer")
-                licenses {
-                    license {
-                        name.set("MIT License")
-                        url.set("https://opensource.org/licenses/MIT")
-                    }
-                }
-                developers {
-                    developer {
-                        id.set("M0ssi-P")
-                        name.set("Pacifique Mossi")
-                    }
-                }
-                scm {
-                    connection.set("scm:git:github.com/M0ssi-P/AuraPlayer.git")
-                    url.set("https://github.com/M0ssi-P/AuraPlayer")
-                }
+        developers {
+            developer {
+                id.set("M0ssi-P")
+                name.set("Pacifique Mossi")
             }
         }
+        scm {
+            connection.set("scm:git:github.com/M0ssi-P/AuraPlayer.git")
+            url.set("https://github.com/M0ssi-P/AuraPlayer")
+        }
     }
+
+    publishToMavenCentral(SonatypeHost.CENTRAL_PORTAL)
+    signAllPublications()
 }
 
 val compileNative by tasks.registering(Exec::class) {

@@ -123,12 +123,12 @@ jobs:
         run: chmod +x gradlew
 
       - name: Publish to Maven Central (Sonatype)
-        run: ./gradlew publishAllPublicationsToSonatypeRepository -Paura_version=${GITHUB_REF_NAME#v}
+        run: ./gradlew publishToMavenCentral -Paura_version=${GITHUB_REF_NAME#v}
         env:
             SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
             SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
-            GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
-            GPG_PASSWORD: ${{ secrets.GPG_PASSWORD }}
+            ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_SIGNING_KEY }}
+            ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSWORD }}
 
       - name: Publish to GitHub Packages
         run: ./gradlew publish
