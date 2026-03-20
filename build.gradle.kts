@@ -17,20 +17,18 @@ repositories {
     google()
 }
 
-//subprojects {
-//    apply(plugin = "maven-publish")
-//    apply(plugin = "signing")
-//
-//    signing {
-//        val signingKey = System.getenv("GPG_SIGNING_KEY")
-//        val signingPassword = System.getenv("GPG_PASSWORD")
-//
-//        if (!signingKey.isNullOrBlank()) {
-//            useInMemoryPgpKeys(signingKey, signingPassword)
-//            sign(extensions.getByType<PublishingExtension>().publications)
-//        }
-//    }
-//}
+subprojects {
+    apply(plugin = "maven-publish")
+    apply(plugin = "signing")
+
+    signing {
+        val signingKey = System.getenv("ORG_GRADLE_PROJECT_signingKey")
+        val signingPassword = System.getenv("ORG_GRADLE_PROJECT_signingPassword")
+
+        useInMemoryPgpKeys(signingKey, signingPassword)
+        sign(publishing.publications)
+    }
+}
 
 dependencies {
     testImplementation(kotlin("test"))
