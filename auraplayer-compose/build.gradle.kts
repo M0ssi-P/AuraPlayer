@@ -6,7 +6,7 @@ plugins {
     id("java-library")
     kotlin("plugin.serialization")
     java
-    id("com.vanniktech.maven.publish") version "0.28.0"
+    id("com.vanniktech.maven.publish")
     id("org.jetbrains.compose")
     id("org.jetbrains.kotlin.plugin.compose")
 }

@@ -2,6 +2,7 @@ plugins {
     kotlin("jvm")
     id("java-library")
     id("maven-publish")
+    id("com.vanniktech.maven.publish") version "0.28.0" apply false
     id("signing")
     java
 }

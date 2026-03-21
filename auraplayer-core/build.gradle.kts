@@ -6,7 +6,7 @@ val isCI = System.getenv("GITHUB_ACTIONS") == "true"
 
 plugins {
     `maven-publish`
-    id("com.vanniktech.maven.publish") version "0.28.0"
+    id("com.vanniktech.maven.publish")
     kotlin("jvm")
     id("java-library")
 }
