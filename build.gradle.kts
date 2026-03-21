@@ -22,8 +22,8 @@ subprojects {
     apply(plugin = "signing")
 
     signing {
-        val signingKey = System.getenv("ORG_GRADLE_PROJECT_signingInMemoryKey")
-        val signingPassword = System.getenv("ORG_GRADLE_PROJECT_signingInMemoryKeyPassword")
+        val signingKey = System.getenv("ORG_GRADLE_PROJECT_signingKey")
+        val signingPassword = System.getenv("ORG_GRADLE_PROJECT_signingPassword")
 
         if (signingKey != null) {
             println("DEBUG: GPG Key length: ${signingKey.length}")
