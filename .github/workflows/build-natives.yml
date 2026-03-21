@@ -122,6 +122,14 @@ jobs:
       - name: Make Gradle Wrapper Executable
         run: chmod +x gradlew
 
+      - name: Debug Secrets Presence
+        run: |
+          if [ -z "${{ secrets.GPG_SIGNING_KEY }}" ]; then
+            echo "ERROR: GPG_SIGNING_KEY is empty!"
+          else
+            echo "SUCCESS: GPG_SIGNING_KEY is set."
+          fi
+
       - name: Publish to Maven Central (Sonatype)
         run: ./gradlew publishToMavenCentral -Paura_version=${GITHUB_REF_NAME#v}
         env:
