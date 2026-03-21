@@ -1,3 +1,5 @@
+import com.vanniktech.maven.publish.SonatypeHost
+
 plugins {
     `maven-publish`
     kotlin("jvm")
@@ -68,6 +70,9 @@ mavenPublishing {
             url.set("https://github.com/M0ssi-P/AuraPlayer")
         }
     }
+
+    publishToMavenCentral(SonatypeHost.CENTRAL_PORTAL)
+    signAllPublications()
 }
 
 compose.desktop {
