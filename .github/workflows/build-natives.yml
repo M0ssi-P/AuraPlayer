@@ -131,7 +131,7 @@ jobs:
           fi
 
       - name: Publish to Maven Central (Sonatype)
-        run: ./gradlew publishToMavenCentral -Paura_version=${GITHUB_REF_NAME#v}
+        run: ./gradlew publishAllPublicationsToMavenCentralRepository -Paura_version=${GITHUB_REF_NAME#v}
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.SONATYPE_USERNAME }}
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.SONATYPE_PASSWORD }}
