@@ -22,8 +22,8 @@ subprojects {
     apply(plugin = "signing")
 
     signing {
-        val signingKey = findProperty("signingInMemoryKey") as String?
-        val signingPassword = findProperty("signingInMemoryKeyPassword") as String?
+        val signingKey = System.getenv("ORG_GRADLE_PROJECT_signingInMemoryKey")
+        val signingPassword = System.getenv("ORG_GRADLE_PROJECT_signingInMemoryKeyPassword")
 
         if (signingKey != null) {
             println("DEBUG: GPG Key length: ${signingKey.length}")
@@ -32,9 +32,14 @@ subprojects {
         println("DEBUG: GPG Password present: ${!signingPassword.isNullOrEmpty()}")
 
 
-        if (signingKey != null && signingPassword != null) {
-            useInMemoryPgpKeys(signingKey, signingPassword)
-            sign(publishing.publications)
+        if (!signingKey.isNullOrBlank() && !signingPassword.isNullOrBlank()) {
+            signing {
+                useInMemoryPgpKeys(signingKey, signingPassword)
+                sign(publishing.publications)
+            }
+            println("DEBUG: Signing configured for ${project.name}")
+        } else {
+            println("DEBUG: Signing SKIPPED for ${project.name} - Key present: ${!signingKey.isNullOrBlank()}, Pwd present: ${!signingPassword.isNullOrBlank()}")
         }
     }
 }
