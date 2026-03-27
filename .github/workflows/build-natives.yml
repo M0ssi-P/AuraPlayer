@@ -65,6 +65,9 @@ jobs:
         run: |
           brew install mpv
           
+          curl -L -H "Authorization: Bearer QQ==" -o mpv-intel.tar.gz https://ghcr.io/v2/homebrew/core/mpv/blobs/sha256:$(curl -s https://formulae.brew.sh/api/formula/mpv.json | jq -r '.bottle.stable.files.sonoma.sha256')
+          mkdir mpv-intel && tar -xzf mpv-intel.tar.gz -C mpv-intel --strip-components=1
+          
           JAWT_PATH=$(find "${{ env.JAVA_HOME }}" -name "libjawt.dylib" -exec dirname {} \;)
           BREW_PATH=$(brew --prefix)
           echo "JAWT found at: $JAWT_PATH"
@@ -81,14 +84,16 @@ jobs:
             -framework AppKit \
             -framework QuartzCore \
             -framework Foundation \
-            -arch arm64
-          
-          MPV_PATH=$(brew --prefix mpv)/lib/libmpv.2.dylib
+            -arch x86_64 -arch arm64 \
+            -mmacosx-version-min=11.0
           
           mkdir -p auraplayer-core/src/main/resources/nativelibs/macos-x64
-          mv libnative_render.dylib auraplayer-core/src/main/resources/nativelibs/macos-x64/
+          lipo -create \
+            $(brew --prefix mpv)/lib/libmpv.2.dylib \
+            mpv-intel/lib/libmpv.2.dylib \
+            -output auraplayer-core/src/main/resources/nativelibs/macos-x64/libmpv.dylib
           
-          cp "$MPV_PATH" auraplayer-core/src/main/resources/nativelibs/macos-x64/libmpv.dylib
+          mv libnative_render.dylib auraplayer-core/src/main/resources/nativelibs/macos-x64/
 
       - name: Make Gradle Wrapper Executable
         run: chmod +x gradlew
