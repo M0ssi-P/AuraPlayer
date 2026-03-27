@@ -56,6 +56,8 @@ jobs:
           
           mkdir -p auraplayer-core/src/main/resources/nativelibs/linux-x64
           mv libnative_render.so auraplayer-core/src/main/resources/nativelibs/linux-x64/
+          
+          cp /usr/lib/x86_64-linux-gnu/libmpv.so.2 auraplayer-core/src/main/resources/nativelibs/linux-x64/
 
       # MacOS Build
       - name: Compile MacOS Dylib
@@ -81,8 +83,12 @@ jobs:
             -framework Foundation \
             -arch arm64
           
+          MPV_PATH=$(brew --prefix mpv)/lib/libmpv.2.dylib
+          
           mkdir -p auraplayer-core/src/main/resources/nativelibs/macos-x64
           mv libnative_render.dylib auraplayer-core/src/main/resources/nativelibs/macos-x64/
+          
+          cp "$MPV_PATH" auraplayer-core/src/main/resources/nativelibs/macos-x64/libmpv.dylib
 
       - name: Make Gradle Wrapper Executable
         run: chmod +x gradlew
