@@ -65,7 +65,7 @@ jobs:
         run: |
           brew install mpv
           
-          kdir -p intel_jdk
+          mkdir -p intel_jdk
           curl -L -o jdk_intel.tar.gz "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.2%2B13/OpenJDK21U-jdk_x64_mac_hotspot_21.0.2_13.tar.gz"
           tar -xzf jdk_intel.tar.gz -C intel_jdk --strip-components=1
           INTEL_JAVA_HOME="$(pwd)/intel_jdk/Contents/Home"
