@@ -75,27 +75,34 @@ jobs:
           curl -L -H "Authorization: Bearer $TOKEN" -o mpv-intel.tar.gz "https://ghcr.io/v2/homebrew/core/mpv/blobs/sha256:$SHA"
           mkdir -p mpv-intel && tar -xzf mpv-intel.tar.gz -C mpv-intel --strip-components=1
           
+          echo "Checking Intel Header Path..."
+          find mpv-intel -name "client.h"
+          
           clang -c auraplayer-core/src/main/c/native_render.c -o native_render_x86.o \
-            -arch x86_64 -mmacosx-version-min=11.0 \
+            -arch x86_64 -mmacosx-version-min=11.0 -fPIC \
             -I"$INTEL_JAVA_HOME/include" -I"$INTEL_JAVA_HOME/include/darwin" \
             -I"./mpv-intel/include"
 
           clang -c auraplayer-core/src/main/c/native_render.c -o native_render_arm.o \
-            -arch arm64 -mmacosx-version-min=11.0 \
+            -arch arm64 -mmacosx-version-min=11.0 -fPIC \
             -I"${{ env.JAVA_HOME }}/include" -I"${{ env.JAVA_HOME }}/include/darwin" \
             -I"$(brew --prefix)/include"
 
           clang -dynamiclib native_render_x86.o -o libnative_render_x86.dylib \
-            -arch x86_64 -L"$INTEL_JAVA_HOME/lib" -ljawt -L"./mpv-intel/lib" -ljawt -lmpv \
+            -arch x86_64 \
+            -L"$INTEL_JAVA_HOME/lib" -ljawt \
+            -L"./mpv-intel/lib" -lmpv \
             -framework AppKit -framework QuartzCore -framework Foundation
 
           clang -dynamiclib native_render_arm.o -o libnative_render_arm.dylib \
-            -arch arm64 -L"${{ env.JAVA_HOME }}/lib" -ljawt -L"$(brew --prefix)/lib" -ljawt -lmpv \
+            -arch arm64 \
+            -L"${{ env.JAVA_HOME }}/lib" -ljawt \
+            -L"$(brew --prefix)/lib" -lmpv \
             -framework AppKit -framework QuartzCore -framework Foundation
 
           mkdir -p auraplayer-core/src/main/resources/nativelibs/macos-x64
           lipo -create libnative_render_x86.dylib libnative_render_arm.dylib -output auraplayer-core/src/main/resources/nativelibs/macos-x64/libnative_render.dylib
-          lipo -create mpv-intel/lib/libmpv.2.dylib $(brew --prefix mpv)/lib/libmpv.2.dylib -output auraplayer-core/src/main/resources/nativelibs/macos-x6/libmpv.dylib
+          lipo -create mpv-intel/lib/libmpv.2.dylib $(brew --prefix mpv)/lib/libmpv.2.dylib -output auraplayer-core/src/main/resources/nativelibs/macos-x64/libmpv.dylib
           
 #          clang -dynamiclib -o libnative_render.dylib auraplayer-core/src/main/c/native_render.c \
 #            -I"${{ env.JAVA_HOME }}/include" \
