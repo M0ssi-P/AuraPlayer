@@ -65,35 +65,59 @@ jobs:
         run: |
           brew install mpv
           
-          curl -L -H "Authorization: Bearer QQ==" -o mpv-intel.tar.gz https://ghcr.io/v2/homebrew/core/mpv/blobs/sha256:$(curl -s https://formulae.brew.sh/api/formula/mpv.json | jq -r '.bottle.stable.files.sonoma.sha256')
-          mkdir mpv-intel && tar -xzf mpv-intel.tar.gz -C mpv-intel --strip-components=1
+          kdir -p intel_jdk
+          curl -L -o jdk_intel.tar.gz "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.2%2B13/OpenJDK21U-jdk_x64_mac_hotspot_21.0.2_13.tar.gz"
+          tar -xzf jdk_intel.tar.gz -C intel_jdk --strip-components=1
+          INTEL_JAVA_HOME="$(pwd)/intel_jdk/Contents/Home"
           
-          JAWT_PATH=$(find "${{ env.JAVA_HOME }}" -name "libjawt.dylib" -exec dirname {} \;)
-          BREW_PATH=$(brew --prefix)
-          echo "JAWT found at: $JAWT_PATH"
-          echo "Homebrew found at: $BREW_PATH"
+          SHA=$(curl -s https://formulae.brew.sh/api/formula/mpv.json | jq -r '.bottle.stable.files.sonoma.sha256')
+          TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:homebrew/core/mpv:pull" | jq -r .token)
+          curl -L -H "Authorization: Bearer $TOKEN" -o mpv-intel.tar.gz "https://ghcr.io/v2/homebrew/core/mpv/blobs/sha256:$SHA"
+          mkdir -p mpv-intel && tar -xzf mpv-intel.tar.gz -C mpv-intel --strip-components=1
           
-          clang -dynamiclib -o libnative_render.dylib auraplayer-core/src/main/c/native_render.c \
-            -I"${{ env.JAVA_HOME }}/include" \
-            -I"${{ env.JAVA_HOME }}/include/darwin" \
-            -I"$BREW_PATH/include" \
-            -L"$JAWT_PATH" \
-            -L"${{ env.JAVA_HOME }}/lib" \
-            -L"$BREW_PATH/lib" \
-            -ljawt -lmpv \
-            -framework AppKit \
-            -framework QuartzCore \
-            -framework Foundation \
-            -arch x86_64 -arch arm64 \
-            -mmacosx-version-min=11.0
-          
+          clang -c auraplayer-core/src/main/c/native_render.c -o native_render_x86.o \
+            -arch x86_64 -mmacosx-version-min=11.0 \
+            -I"$INTEL_JAVA_HOME/include" -I"$INTEL_JAVA_HOME/include/darwin" \
+            -I"./mpv-intel/include"
+
+          clang -c auraplayer-core/src/main/c/native_render.c -o native_render_arm.o \
+            -arch arm64 -mmacosx-version-min=11.0 \
+            -I"${{ env.JAVA_HOME }}/include" -I"${{ env.JAVA_HOME }}/include/darwin" \
+            -I"$(brew --prefix)/include"
+
+          clang -dynamiclib native_render_x86.o -o libnative_render_x86.dylib \
+            -arch x86_64 -L"$INTEL_JAVA_HOME/lib" -ljawt -L"./mpv-intel/lib" -ljawt -lmpv \
+            -framework AppKit -framework QuartzCore -framework Foundation
+
+          clang -dynamiclib native_render_arm.o -o libnative_render_arm.dylib \
+            -arch arm64 -L"${{ env.JAVA_HOME }}/lib" -ljawt -L"$(brew --prefix)/lib" -ljawt -lmpv \
+            -framework AppKit -framework QuartzCore -framework Foundation
+
           mkdir -p auraplayer-core/src/main/resources/nativelibs/macos-x64
-          lipo -create \
-            $(brew --prefix mpv)/lib/libmpv.2.dylib \
-            mpv-intel/lib/libmpv.2.dylib \
-            -output auraplayer-core/src/main/resources/nativelibs/macos-x64/libmpv.dylib
+          lipo -create libnative_render_x86.dylib libnative_render_arm.dylib -output auraplayer-core/src/main/resources/nativelibs/macos-x64/libnative_render.dylib
+          lipo -create mpv-intel/lib/libmpv.2.dylib $(brew --prefix mpv)/lib/libmpv.2.dylib -output auraplayer-core/src/main/resources/nativelibs/macos-x6/libmpv.dylib
           
-          mv libnative_render.dylib auraplayer-core/src/main/resources/nativelibs/macos-x64/
+#          clang -dynamiclib -o libnative_render.dylib auraplayer-core/src/main/c/native_render.c \
+#            -I"${{ env.JAVA_HOME }}/include" \
+#            -I"${{ env.JAVA_HOME }}/include/darwin" \
+#            -I"$BREW_PATH/include" \
+#            -L"$JAWT_PATH" \
+#            -L"${{ env.JAVA_HOME }}/lib" \
+#            -L"$BREW_PATH/lib" \
+#            -ljawt -lmpv \
+#            -framework AppKit \
+#            -framework QuartzCore \
+#            -framework Foundation \
+#            -arch x86_64 -arch arm64 \
+#            -mmacosx-version-min=11.0
+#
+#          mkdir -p auraplayer-core/src/main/resources/nativelibs/macos-x64
+#          lipo -create \
+#            $(brew --prefix mpv)/lib/libmpv.2.dylib \
+#            mpv-intel/lib/libmpv.2.dylib \
+#            -output auraplayer-core/src/main/resources/nativelibs/macos-x64/libmpv.dylib
+#
+#          mv libnative_render.dylib auraplayer-core/src/main/resources/nativelibs/macos-x64/
 
       - name: Make Gradle Wrapper Executable
         run: chmod +x gradlew
