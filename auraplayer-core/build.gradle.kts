@@ -87,19 +87,54 @@ val compileNative by tasks.registering(Exec::class) {
     val outputFile = File(nativeResDir, "${getCurrentPlatform()}/$outputName")
 
     doFirst {
+        println(outputFile.parentFile)
         outputFile.parentFile.mkdirs()
     }
 
-    commandLine(
-        "gcc", "-shared", "-fPIC",
-        "-o", outputFile.absolutePath,
-        "${nativeSrcDir.absolutePath}/native_render.c",
-        "-I", "C:/deps/mpv-sdk/include",
-        "-I", "$jdkHome/include",
-        "-I", "$jdkHome/include/$osInclude",
-        "C:/deps/mpv-sdk/libmpv.dll.a",
-        "$jdkHome/lib/jawt.lib"
-    )
+    val args = when {
+        os.isWindows -> listOf(
+            "gcc", "-shared", "-fPIC",
+            "-o", outputFile.absolutePath,
+            "${nativeSrcDir.absolutePath}/native_render.c",
+            "-I", "C:/deps/mpv-sdk/include",
+            "-I", "$jdkHome/include",
+            "-I", "$jdkHome/include/win32",
+            "C:/deps/mpv-sdk/libmpv.dll.a",
+            "$jdkHome/lib/jawt.lib"
+        )
+
+        os.isMacOsX -> listOf(
+            "clang", "-dynamiclib", "-fPIC",
+            "-o", outputFile.absolutePath,
+            "${nativeSrcDir.absolutePath}/native_render.c",
+            "${nativeSrcDir.absolutePath}/jawt_macos.m",
+            "-I", "/Users/user1/Downloads/libmpv-macos/include",
+            "-I", "$jdkHome/include",
+            "-I", "$jdkHome/include/darwin",
+            "-L", "/Users/user1/Downloads/libmpv-macos",  // <-- directory
+            "-lmpv",
+            "-L", "$jdkHome/lib",
+            "-ljawt",
+            "-framework", "AppKit",
+            "-framework", "QuartzCore",
+            "-framework", "Foundation",
+            "-framework", "OpenGL",
+            "-framework", "CoreGraphics",
+            "-framework", "CoreVideo"
+        )
+
+        else -> listOf(
+            "gcc", "-shared", "-fPIC",
+            "-o", outputFile.absolutePath,
+            "${nativeSrcDir.absolutePath}/native_render.c",
+            "-I", "/usr/include",
+            "-I", "$jdkHome/include",
+            "-I", "$jdkHome/include/linux",
+            "-L$jdkHome/lib", "-ljawt", "-lmpv"
+        )
+    }
+
+    commandLine(args)
 }
 
 val copyMpvBinaries by tasks.registering(Copy::class) {
@@ -108,17 +143,25 @@ val copyMpvBinaries by tasks.registering(Copy::class) {
 
     onlyIf { !isCI }
 
-    val sourceFile = file("C:/deps/mpv-sdk/libmpv-2.dll")
+    val os = org.gradle.internal.os.OperatingSystem.current()
+
+    val filePath = when {
+        os.isWindows -> "C:/deps/mpv-sdk/libmpv-2.dll"
+        os.isMacOsX -> "/Users/user1/Downloads/libmpv-macos/libmpv.dylib"
+        else -> "C:/deps/mpv-sdk/libmpv-2.dll"
+    }
+
+    val sourceFile = file(filePath)
 
     doFirst {
         if (!sourceFile.exists()) {
-            throw GradleException("FATAL: Could not find libmpv-2.dll at ${sourceFile.absolutePath}. Check your C:/deps/ folder!")
+            throw GradleException("FATAL: Could not find libmpv at ${sourceFile.absolutePath}. Check your C:/deps/ folder!")
         }
         println("AuraPlayer: Copying engine from ${sourceFile.absolutePath}...")
     }
 
     from(sourceFile)
-    into(File(nativeResDir, "windows-x64"))
+    into(File(nativeResDir, getCurrentPlatform()))
 }
 
 fun getCurrentPlatform(): String {

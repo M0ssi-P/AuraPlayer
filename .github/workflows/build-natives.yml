@@ -1,4 +1,4 @@
-name: Build Multi-Platform Natives abd Release
+name: Build Multi-Platform Natives and Release
 on:
   push:
     tags:
@@ -20,113 +20,130 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
+      # ------------------------------------------------------------------
       # Windows Build
+      # ------------------------------------------------------------------
       - name: Compile Windows DLL
         if: matrix.os == 'windows-latest'
         run: |
-          # Download the dev kit
           curl -L -o mpv-sdk.7z https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20260304/mpv-dev-x86_64-20260304-git-c401ef9.7z
           7z x mpv-sdk.7z -ompv-dev
 
-          gcc -shared -o native_render.dll auraplayer-core/src/main/c/native_render.c `
+          gcc -shared -o native_render.dll `
+            auraplayer-core/src/main/c/native_player.c `
+            auraplayer-core/src/main/c/native_surface_win.c `
             -Impv-dev/include `
             -I"${{ env.JAVA_HOME }}/include" `
             -I"${{ env.JAVA_HOME }}/include/win32" `
-            -L"${{ env.JAVA_HOME }}/lib" `
-            -ljawt `
+            "${{ env.JAVA_HOME }}/lib/jawt.lib" `
             mpv-dev/libmpv.dll.a
 
           New-Item -ItemType Directory -Force -Path "auraplayer-core/src/main/resources/nativelibs/windows-x64"
           Move-Item -Force native_render.dll auraplayer-core/src/main/resources/nativelibs/windows-x64/
           Copy-Item -Force mpv-dev/libmpv-2.dll auraplayer-core/src/main/resources/nativelibs/windows-x64/
 
+      # ------------------------------------------------------------------
       # Linux Build
+      # ------------------------------------------------------------------
       - name: Compile Linux SO
         if: matrix.os == 'ubuntu-latest'
         run: |
-          # Install the MPV development headers and library
           sudo apt-get update
-          sudo apt-get install -y libmpv-dev
-          gcc -fPIC -shared -o libnative_render.so auraplayer-core/src/main/c/native_render.c \
+          # FIX: libx11-dev is required by jawt_md.h on Linux
+          sudo apt-get install -y libmpv-dev libx11-dev
+
+          gcc -fPIC -shared -o libnative_render.so \
+            auraplayer-core/src/main/c/native_player.c \
+            auraplayer-core/src/main/c/native_surface_x11.c \
             -I"${{ env.JAVA_HOME }}/include" \
             -I"${{ env.JAVA_HOME }}/include/linux" \
             -L"${{ env.JAVA_HOME }}/lib" \
             -ljawt \
             -lmpv
-          
+
           mkdir -p auraplayer-core/src/main/resources/nativelibs/linux-x64
           mv libnative_render.so auraplayer-core/src/main/resources/nativelibs/linux-x64/
-          
+        
           cp /usr/lib/x86_64-linux-gnu/libmpv.so.2 auraplayer-core/src/main/resources/nativelibs/linux-x64/
 
-      # MacOS Build
+      # ------------------------------------------------------------------
+      # macOS Build
+      # ------------------------------------------------------------------
       - name: Compile MacOS Dylib
         if: matrix.os == 'macos-latest'
         run: |
-          brew install mpv
-          
           mkdir -p intel_jdk
           curl -L -o jdk_intel.tar.gz "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.2%2B13/OpenJDK21U-jdk_x64_mac_hotspot_21.0.2_13.tar.gz"
           tar -xzf jdk_intel.tar.gz -C intel_jdk --strip-components=1
           INTEL_JAVA_HOME="$(pwd)/intel_jdk/Contents/Home"
-          
-          SHA=$(curl -s https://formulae.brew.sh/api/formula/mpv.json | jq -r '.bottle.stable.files.sonoma.sha256')
-          TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:homebrew/core/mpv:pull" | jq -r .token)
-          curl -L -H "Authorization: Bearer $TOKEN" -o mpv-intel.tar.gz "https://ghcr.io/v2/homebrew/core/mpv/blobs/sha256:$SHA"
-          mkdir -p mpv-intel && tar -xzf mpv-intel.tar.gz -C mpv-intel --strip-components=1
-          
-          INTEL_MPV_INC=$(find $(pwd)/mpv-intel -name "include" -type d | head -n 1)
-          INTEL_MPV_LIB=$(find $(pwd)/mpv-intel -name "lib" -type d | head -n 1)
-          echo "Intel Headers found at: $INTEL_MPV_INC"
-          echo "Intel Libs found at: $INTEL_MPV_LIB"
-          
-          clang -c auraplayer-core/src/main/c/native_render.c -o native_render_x86.o \
+
+          NATIVE_DIR="auraplayer-core/src/main/resources/nativelibs/macos-x64"
+          mkdir -p "$NATIVE_DIR"
+
+          curl -L -o libmpv-macos.zip \
+            "https://github.com/M0ssi-P/mpv-macbuild/releases/latest/download/libmpv-macos.zip"
+          unzip -o libmpv-macos.zip -d mpv-package
+
+          cp mpv-package/libmpv.dylib "$NATIVE_DIR/libmpv.dylib"
+          lipo -archs "$NATIVE_DIR/libmpv.dylib"
+
+          mkdir -p auraplayer-core/src/main/c/include
+          cp -r mpv-package/include/mpv auraplayer-core/src/main/c/include/mpv
+          MPV_INC="$(pwd)/auraplayer-core/src/main/c/include"
+          SRC="auraplayer-core/src/main/c"
+
+          # ---- x86_64 slice: portable core (C) + mac surface (ObjC/ARC) ----
+          clang -c "$SRC/native_render.c" -o native_render_x86.o \
             -arch x86_64 -mmacosx-version-min=11.0 -fPIC \
             -I"$INTEL_JAVA_HOME/include" -I"$INTEL_JAVA_HOME/include/darwin" \
-            -I"$INTEL_MPV_INC"
+            -I"$MPV_INC"
 
-          clang -c auraplayer-core/src/main/c/native_render.c -o native_render_arm.o \
+          clang -c "$SRC/jawt_macos.m" -o jawt_macos_x86.o \
+            -arch x86_64 -mmacosx-version-min=11.0 -fPIC -fobjc-arc \
+            -I"$INTEL_JAVA_HOME/include" -I"$INTEL_JAVA_HOME/include/darwin" \
+            -I"$MPV_INC"
+
+          # ---- arm64 slice ----
+          clang -c "$SRC/native_render.c" -o native_render_arm.o \
             -arch arm64 -mmacosx-version-min=11.0 -fPIC \
             -I"${{ env.JAVA_HOME }}/include" -I"${{ env.JAVA_HOME }}/include/darwin" \
-            -I"$(brew --prefix)/include"
+            -I"$MPV_INC"
 
-          clang -dynamiclib native_render_x86.o -o libnative_render_x86.dylib \
+          clang -c "$SRC/jawt_macos.m" -o jawt_macos_arm.o \
+            -arch arm64 -mmacosx-version-min=11.0 -fPIC -fobjc-arc \
+            -I"${{ env.JAVA_HOME }}/include" -I"${{ env.JAVA_HOME }}/include/darwin" \
+            -I"$MPV_INC"
+
+          # FIX: dropped -framework OpenGL (nothing uses GL anymore).
+          # FIX: -rpath @loader_path so the @rpath/libmpv.dylib reference
+          #      resolves from the same directory the loader extracts to.
+          clang -dynamiclib native_render_x86.o jawt_macos_x86.o \
+            -o libnative_render_x86.dylib \
             -arch x86_64 \
             -L"$INTEL_JAVA_HOME/lib" -ljawt \
-            -L"$INTEL_MPV_LIB" -lmpv \
-            -framework AppKit -framework QuartzCore -framework Foundation
+            -L"$NATIVE_DIR" -lmpv \
+            -Wl,-rpath,@loader_path \
+            -framework AppKit -framework QuartzCore -framework Foundation \
+            -framework CoreGraphics
 
-          clang -dynamiclib native_render_arm.o -o libnative_render_arm.dylib \
+          clang -dynamiclib native_player_arm.o jawt_macos_arm.o \
+            -o libnative_render_arm.dylib \
             -arch arm64 \
             -L"${{ env.JAVA_HOME }}/lib" -ljawt \
-            -L"$(brew --prefix)/lib" -lmpv \
-            -framework AppKit -framework QuartzCore -framework Foundation
+            -L"$NATIVE_DIR" -lmpv \
+            -Wl,-rpath,@loader_path \
+            -framework AppKit -framework QuartzCore -framework Foundation \
+            -framework CoreGraphics
 
-          mkdir -p auraplayer-core/src/main/resources/nativelibs/macos-x64
-          lipo -create libnative_render_x86.dylib libnative_render_arm.dylib -output auraplayer-core/src/main/resources/nativelibs/macos-x64/libnative_render.dylib
-          lipo -create "$INTEL_MPV_LIB/libmpv.2.dylib" $(brew --prefix mpv)/lib/libmpv.2.dylib -output auraplayer-core/src/main/resources/nativelibs/macos-x64/libmpv.dylib
-          
-#          clang -dynamiclib -o libnative_render.dylib auraplayer-core/src/main/c/native_render.c \
-#            -I"${{ env.JAVA_HOME }}/include" \
-#            -I"${{ env.JAVA_HOME }}/include/darwin" \
-#            -I"$BREW_PATH/include" \
-#            -L"$JAWT_PATH" \
-#            -L"${{ env.JAVA_HOME }}/lib" \
-#            -L"$BREW_PATH/lib" \
-#            -ljawt -lmpv \
-#            -framework AppKit \
-#            -framework QuartzCore \
-#            -framework Foundation \
-#            -arch x86_64 -arch arm64 \
-#            -mmacosx-version-min=11.0
-#
-#          mkdir -p auraplayer-core/src/main/resources/nativelibs/macos-x64
-#          lipo -create \
-#            $(brew --prefix mpv)/lib/libmpv.2.dylib \
-#            mpv-intel/lib/libmpv.2.dylib \
-#            -output auraplayer-core/src/main/resources/nativelibs/macos-x64/libmpv.dylib
-#
-#          mv libnative_render.dylib auraplayer-core/src/main/resources/nativelibs/macos-x64/
+          lipo -create libnative_render_x86.dylib libnative_render_arm.dylib \
+            -output "$NATIVE_DIR/libnative_render.dylib"
+
+          xattr -cr "$NATIVE_DIR/libnative_render.dylib"
+          codesign --force -s - "$NATIVE_DIR/libnative_render.dylib"
+
+          echo "=== Final verification ==="
+          otool -L "$NATIVE_DIR/libnative_render.dylib"
+          lipo -archs "$NATIVE_DIR/libnative_render.dylib"
 
       - name: Make Gradle Wrapper Executable
         run: chmod +x gradlew
@@ -190,4 +207,4 @@ jobs:
             auraplayer-core/build/libs/*.jar
             auraplayer-compose/build/libs/*.jar
         env:
-            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

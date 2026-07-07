@@ -111,12 +111,15 @@ class AuraPlayer {
     private external fun getNativeTracks(): Array<MediaTrack>?
 
     private external fun initializeNative(canvas: Canvas, audioOnly: Boolean)
+    external fun updateSurfaceBounds(x: Int, y: Int, w: Int, h: Int)
+    external fun setSurfaceVisible(visible: Boolean)
     private external fun getAudioLevels(): DoubleArray
     external fun loadFile(url: String)
 
     fun initialize(canvas: Canvas, audioOnly: Boolean) {
         if(!_isInitialized.value) {
             initializeNative(canvas, audioOnly)
+            canvas.createBufferStrategy(2)
             _isInitialized.value = true
         }
     }
