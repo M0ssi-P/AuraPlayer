@@ -95,12 +95,14 @@ val compileNative by tasks.registering(Exec::class) {
         os.isWindows -> listOf(
             "gcc", "-shared", "-fPIC",
             "-o", outputFile.absolutePath,
+            "${nativeSrcDir.absolutePath}/jawt_win.c",
             "${nativeSrcDir.absolutePath}/native_render.c",
             "-I", "C:/deps/mpv-sdk/include",
             "-I", "$jdkHome/include",
             "-I", "$jdkHome/include/win32",
             "C:/deps/mpv-sdk/libmpv.dll.a",
-            "$jdkHome/lib/jawt.lib"
+            "$jdkHome/lib/jawt.lib",
+            "-lgdi32", "-luser32"
         )
 
         os.isMacOsX -> listOf(
