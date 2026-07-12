@@ -1,26 +1,29 @@
 /*
  * macOS surface layer for AuraPlayer -- multi-instance + underlay.
- * Compile with -fobjc-arc.
+ * Compile with -fobjc-arc. Link with:
+ *   -framework AppKit -framework QuartzCore -framework Foundation
+ *   -framework CoreGraphics -framework Metal            <-- Metal is NEW
  *
- * Each player owns its own CAMetalLayer (attached via JAWT_SurfaceLayers,
- * consumed by gpu-context=macembed). enableUnderlay() re-orders THIS
- * player's layer below Skiko's Metal layer so Compose (with a Clear-rect
- * hole) composites on top. No windows are created; the frame keeps its
- * shadow and titlebar.
+ * FIXES in this version:
+ *   [FIX-DEV]   layer.device + layer.pixelFormat set explicitly. mpv's own
+ *               layer path configures these itself; a caller-supplied layer
+ *               must do it. Prime suspect for "plays but invisible".
+ *   [FIX-SIZE]  width/height clamped so a 1x1 canvas at init time can never
+ *               produce a 1x1 swapchain ("Could not initialize video chain").
+ *   [FIX-STUB]  setUnderlay / setBorderlessFullscreen no-op symbols so the
+ *               Kotlin class links uniformly on macOS.
  */
-
 #import <Cocoa/Cocoa.h>
 #import <QuartzCore/QuartzCore.h>
-
+#import <Metal/Metal.h>
 #include <jawt.h>
 #include <jawt_md.h>
 #include <stdio.h>
 #include <stdlib.h>
-
-#include "native_player.h"
+#include "jawt_macos.h"
 
 struct AuraSurface {
-    void *layer; /* CAMetalLayer, retained via __bridge_retained */
+    void *layer; /* CAMetalLayer, retained (ARC __bridge_retained) */
 };
 
 static void run_on_main(void (^block)(void))
@@ -32,7 +35,6 @@ static void run_on_main(void (^block)(void))
 AuraSurface *aura_surface_attach(JNIEnv *env, jobject canvas, int64_t *wid_out)
 {
     *wid_out = 0;
-
     JAWT awt;
     awt.version = JAWT_VERSION_9;
     if (JAWT_GetAWT(env, &awt) == JNI_FALSE) {
@@ -45,10 +47,8 @@ AuraSurface *aura_surface_attach(JNIEnv *env, jobject canvas, int64_t *wid_out)
             return NULL;
         }
     }
-
     JAWT_DrawingSurface *ds = awt.GetDrawingSurface(env, canvas);
     if (!ds) return NULL;
-
     AuraSurface *s = NULL;
     jint lock = ds->Lock(ds);
     if ((lock & JAWT_LOCK_ERROR) == 0) {
@@ -57,13 +57,21 @@ AuraSurface *aura_surface_attach(JNIEnv *env, jobject canvas, int64_t *wid_out)
             id<JAWT_SurfaceLayers> surfaceLayers =
                 (__bridge id<JAWT_SurfaceLayers>)dsi->platformInfo;
 
-            jint w = dsi->bounds.width;
-            jint h = dsi->bounds.height;
+            /* [FIX-SIZE] never create a degenerate layer; the canvas may
+             * still be at its placeholder 1x1 bounds when init runs. */
+            jint w = dsi->bounds.width  > 16 ? dsi->bounds.width  : 640;
+            jint h = dsi->bounds.height > 16 ? dsi->bounds.height : 360;
 
             __block void *retained = NULL;
             run_on_main(^{
                 CAMetalLayer *layer = [CAMetalLayer layer];
                 CGFloat scale = [NSScreen mainScreen].backingScaleFactor;
+
+                /* [FIX-DEV] a caller-supplied layer must bring its own
+                 * device + pixel format; mpv only does this for layers
+                 * it creates itself. */
+                layer.device      = MTLCreateSystemDefaultDevice();
+                layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
 
                 layer.contentsScale   = scale;
                 layer.opaque          = YES;
@@ -74,8 +82,13 @@ AuraSurface *aura_surface_attach(JNIEnv *env, jobject canvas, int64_t *wid_out)
 
                 surfaceLayers.layer = layer;
                 retained = (__bridge_retained void *)layer;
-            });
 
+                fprintf(stderr,
+                    "[AuraPlayer/mac] layer=%p %dx%d scale=%.1f device=%p\n",
+                    (__bridge void *)layer, (int)w, (int)h, scale,
+                    (__bridge void *)layer.device);
+                fflush(stderr);
+            });
             if (retained) {
                 s = (AuraSurface *)calloc(1, sizeof(AuraSurface));
                 s->layer = retained;
@@ -86,7 +99,6 @@ AuraSurface *aura_surface_attach(JNIEnv *env, jobject canvas, int64_t *wid_out)
         ds->Unlock(ds);
     }
     awt.FreeDrawingSurface(ds);
-
     if (!s) fprintf(stderr, "[AuraPlayer/mac] surface attach failed\n");
     return s;
 }
@@ -95,7 +107,6 @@ void aura_surface_resize(AuraSurface *s, int w, int h)
 {
     if (!s || !s->layer || w <= 0 || h <= 0) return;
     CAMetalLayer *layer = (__bridge CAMetalLayer *)s->layer;
-
     dispatch_async(dispatch_get_main_queue(), ^{
         CGFloat scale = layer.superlayer
                             ? layer.superlayer.contentsScale
@@ -122,7 +133,6 @@ void aura_surface_detach(AuraSurface *s)
 {
     if (!s) return;
     if (s->layer) {
-        /* transfer ownership into the block; ARC releases it afterwards */
         CAMetalLayer *layer = (__bridge_transfer CAMetalLayer *)s->layer;
         s->layer = NULL;
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -148,31 +158,47 @@ static void find_other_metal_layer(CALayer *layer, CALayer *mine, CALayer **foun
         find_other_metal_layer(sub, mine, found);
 }
 
-/*
- * enableUnderlay(videoLayerPtr): put THIS player's layer below Skiko's
- * layer and let Skiko's layer have transparency, so a Compose Clear-rect
- * becomes a see-through hole onto the video.
- */
 JNIEXPORT void JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_enableUnderlay(
     JNIEnv *env, jobject obj, jlong videoLayerPtr)
 {
     (void)env; (void)obj;
     CAMetalLayer *mine = (__bridge CAMetalLayer *)(void *)(intptr_t)videoLayerPtr;
     if (!mine) return;
-
     dispatch_async(dispatch_get_main_queue(), ^{
         CALayer *root = mine;
         while (root.superlayer) root = root.superlayer;
-
         CALayer *skiko = nil;
         find_other_metal_layer(root, mine, &skiko);
         if (!skiko) {
             fprintf(stderr, "[AuraPlayer/mac] Skiko layer not found\n");
             return;
         }
-
-        skiko.opaque    = NO;      /* Compose pixels may be transparent   */
+        skiko.opaque    = NO;
         skiko.zPosition = 0;
-        mine.zPosition  = -1000;   /* video sits under Compose            */
+        mine.zPosition  = -1000;
+    });
+}
+
+/* [FIX-STUB] Windows-only concepts; symbols must still exist on macOS. */
+JNIEXPORT void JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_setUnderlay(
+    JNIEnv *env, jobject obj, jlong root, jlong video, jint index,
+    jint x, jint y, jint w, jint h, jboolean enable)
+{
+    (void)env; (void)obj; (void)root; (void)video;
+    (void)index; (void)x; (void)y; (void)w; (void)h; (void)enable;
+}
+
+JNIEXPORT void JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_setBorderlessFullscreen(
+    JNIEnv *env, jobject obj, jlong handle, jboolean enable)
+{
+    (void)env; (void)obj;
+    NSWindow *win = (__bridge NSWindow *)(void *)(intptr_t)handle;
+    if (!win) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        BOOL isFs = (win.styleMask & NSWindowStyleMaskFullScreen) != 0;
+        if ((enable && !isFs) || (!enable && isFs)) {
+            win.collectionBehavior |= NSWindowCollectionBehaviorFullScreenPrimary;
+            [win toggleFullScreen:nil];
+        }
     });
 }

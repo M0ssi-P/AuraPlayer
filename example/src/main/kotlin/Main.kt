@@ -60,7 +60,10 @@ fun main() {
                             .aspectRatio(16f / 9f)
                             .align(Alignment.CenterHorizontally),
                         controls = {
-                            AuraControlBar(engine)
+                            AuraControlBar(
+                                engine,
+                                modifier = Modifier.align(Alignment.BottomCenter),
+                            )
                         }
                     )
                 }

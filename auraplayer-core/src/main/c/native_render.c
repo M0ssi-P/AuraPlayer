@@ -1,50 +1,23 @@
 /*
  * AuraPlayer portable JNI core -- multi-instance.
- *
- * Every AuraPlayer instance owns one AuraCtx (returned to Kotlin as a
- * jlong handle). No global mpv state: create as many players as you like,
- * each with its own mpv_handle, event thread, surface, and callbacks.
- *
- * Lifecycle contract (mirrored in AuraPlayer.kt):
- *   createNative()                 -> handle          (mpv_create, options later)
- *   initializeNative(h, canvas, audioOnly)            (surface + mpv_initialize + thread)
- *   ... playback calls (h, ...) ...
- *   terminateNative(h)             -> quit, join thread, destroy, free
+ * FIXES in this version:
+ *   [FIX-LOG] msg-level set + mpv_request_log_messages("debug") so verbose
+ *             vo/gpu output actually reaches the Kotlin log callback.
+ *             (Revert both to quieter levels once macOS renders.)
  */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
 #include <mpv/client.h>
-
 #ifdef _WIN32
     #include <windows.h>
     #include <process.h>
 #else
     #include <pthread.h>
 #endif
-
+#include "aura_ctx.h"
 #include "jawt_macos.h"
 
-/* ---------------------------------------------------------------------- */
-/* Per-instance context                                                    */
-/* ---------------------------------------------------------------------- */
-
-typedef struct AuraCtx {
-    mpv_handle  *mpv;
-    jobject      jself;     /* GlobalRef to the Kotlin AuraPlayer instance */
-    AuraSurface *surface;   /* NULL in audio-only mode or before init */
-    int64_t      wid;
-#ifdef _WIN32
-    HANDLE       thread;
-#else
-    pthread_t    thread;
-    int          thread_started;
-#endif
-} AuraCtx;
-
-/* One JavaVM per process -- the only global, and a legitimate one. */
 static JavaVM *g_vm = NULL;
 
 static AuraCtx *ctx_of(jlong handle)
@@ -52,7 +25,6 @@ static AuraCtx *ctx_of(jlong handle)
     return (AuraCtx *)(intptr_t)handle;
 }
 
-/* State codes mirrored in AuraPlayer.kt */
 #define STATE_PLAYING   0
 #define STATE_PAUSED    1
 #define STATE_STOPPED   2
@@ -64,26 +36,18 @@ static AuraCtx *ctx_of(jlong handle)
 static int get_internal_state(AuraCtx *c)
 {
     if (!c || !c->mpv) return STATE_STOPPED;
-
     int64_t paused = 0, core_idle = 0, seeking = 0;
     mpv_get_property(c->mpv, "pause",     MPV_FORMAT_FLAG, &paused);
     mpv_get_property(c->mpv, "core-idle", MPV_FORMAT_FLAG, &core_idle);
     mpv_get_property(c->mpv, "seeking",   MPV_FORMAT_FLAG, &seeking);
-
     if (seeking) return STATE_SEEKING;
-
     if (core_idle) {
         double duration = 0;
         mpv_get_property(c->mpv, "duration", MPV_FORMAT_DOUBLE, &duration);
         return (duration <= 0) ? STATE_LOADING : STATE_BUFFERING;
     }
-
     return paused ? STATE_PAUSED : STATE_PLAYING;
 }
-
-/* ---------------------------------------------------------------------- */
-/* Per-instance mpv event loop                                             */
-/* ---------------------------------------------------------------------- */
 
 #ifdef _WIN32
 static unsigned __stdcall event_loop(void *arg) {
@@ -94,11 +58,9 @@ static void *event_loop(void *arg) {
 #endif
     AuraCtx *c = (AuraCtx *)arg;
     if (!g_vm || !c || !c->jself) goto thread_exit;
-
     JNIEnv *env;
     if ((*g_vm)->AttachCurrentThread(g_vm, (void **)&env, NULL) != 0)
         goto thread_exit;
-
     jclass cls = (*env)->GetObjectClass(env, c->jself);
     jmethodID onStateChanged    = (*env)->GetMethodID(env, cls, "onNativeStateChange",    "(I)V");
     jmethodID onTimeChanged     = (*env)->GetMethodID(env, cls, "onNativeTimeChange",     "(D)V");
@@ -108,25 +70,20 @@ static void *event_loop(void *arg) {
     jmethodID onVolumeChanged   = (*env)->GetMethodID(env, cls, "onNativeVolumeChange",   "(D)V");
     jmethodID onMuteChanged     = (*env)->GetMethodID(env, cls, "onNativeMuteChange",     "(Z)V");
     jmethodID onSpeedChanged    = (*env)->GetMethodID(env, cls, "onNativeSpeedChange",    "(D)V");
-
     if (!onStateChanged || !onTimeChanged || !onDurationChanged || !onTracksChanged) {
         fprintf(stderr, "[AuraPlayer] Error: Could not find Kotlin callback methods!\n");
         goto detach_exit;
     }
-
     for (;;) {
         mpv_event *event = mpv_wait_event(c->mpv, -1);
         if (event->event_id == MPV_EVENT_SHUTDOWN)
-            break;  /* "quit" was processed; terminateNative will destroy */
-
+            break;
         switch (event->event_id) {
             case MPV_EVENT_FILE_LOADED:
                 (*env)->CallVoidMethod(env, c->jself, onTracksChanged);
                 break;
-
             case MPV_EVENT_PROPERTY_CHANGE: {
                 mpv_event_property *prop = (mpv_event_property *)event->data;
-
                 if (strcmp(prop->name, "time-pos") == 0 && prop->format == MPV_FORMAT_DOUBLE) {
                     (*env)->CallVoidMethod(env, c->jself, onTimeChanged, *(double *)prop->data);
                 } else if (strcmp(prop->name, "volume") == 0 && prop->format == MPV_FORMAT_DOUBLE) {
@@ -147,41 +104,102 @@ static void *event_loop(void *arg) {
                 }
                 break;
             }
-
             case MPV_EVENT_LOG_MESSAGE: {
                 mpv_event_log_message *msg = (mpv_event_log_message *)event->data;
                 fprintf(stderr, "[mpv/%s] %s: %s", msg->level, msg->prefix, msg->text);
                 break;
             }
-
             case MPV_EVENT_END_FILE:
                 (*env)->CallVoidMethod(env, c->jself, onStateChanged, (jint)STATE_IDLE);
                 break;
-
             default:
                 break;
         }
     }
-
 detach_exit:
     (*g_vm)->DetachCurrentThread(g_vm);
 thread_exit:
     return THREAD_RETURN;
 }
 
-/* ---------------------------------------------------------------------- */
-/* JNI: lifecycle                                                          */
-/* ---------------------------------------------------------------------- */
+#ifdef _WIN32
+
+JNIEXPORT jboolean JNICALL
+Java_com_mossip_auraplayer_engine_AuraDComp_dcompInit(
+    JNIEnv *env, jobject thiz, jlong ctxPtr, jlong topLevelHwnd)
+{
+    (void)env; (void)thiz;
+    AuraCtx *c = (AuraCtx *)(intptr_t)ctxPtr;
+    if (!aura_dcomp_init(c, (HWND)(intptr_t)topLevelHwnd)) return JNI_FALSE;
+    if (!aura_angle_init(c))                               return JNI_FALSE;
+    return JNI_TRUE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_mossip_auraplayer_engine_AuraDComp_dcompCreateRenderContext(
+    JNIEnv *env, jobject thiz, jlong ctxPtr)
+{
+    (void)env; (void)thiz;
+    AuraCtx *c = (AuraCtx *)(intptr_t)ctxPtr;
+    if (!aura_angle_create_mpv_render_context(c)) return JNI_FALSE;
+    aura_angle_start_render_thread(c);
+    return JNI_TRUE;
+}
+
+JNIEXPORT void JNICALL
+Java_com_mossip_auraplayer_engine_AuraDComp_dcompSetVideoRect(
+    JNIEnv *env, jobject thiz, jlong ctxPtr,
+    jint x, jint y, jint w, jint h)
+{
+    (void)env; (void)thiz;
+    aura_dcomp_set_video_rect((AuraCtx *)(intptr_t)ctxPtr, x, y, w, h);
+}
+
+JNIEXPORT void JNICALL
+Java_com_mossip_auraplayer_engine_AuraDComp_dcompAttachUiSwapchain(
+    JNIEnv *env, jobject thiz, jlong ctxPtr, jlong swapchainPtr)
+{
+    (void)env; (void)thiz;
+    aura_dcomp_attach_ui((AuraCtx *)(intptr_t)ctxPtr,
+                         (IDXGISwapChain3 *)(intptr_t)swapchainPtr);
+}
+
+JNIEXPORT void JNICALL
+Java_com_mossip_auraplayer_engine_AuraDComp_dcompCommit(
+    JNIEnv *env, jobject thiz, jlong ctxPtr)
+{
+    (void)env; (void)thiz;
+    aura_dcomp_commit((AuraCtx *)(intptr_t)ctxPtr);
+}
+
+/* Step-1 smoke test only — remove once video works. */
+JNIEXPORT void JNICALL
+Java_com_mossip_auraplayer_engine_AuraDComp_dcompDebugFill(
+    JNIEnv *env, jobject thiz, jlong ctxPtr)
+{
+    (void)env; (void)thiz;
+    aura_dcomp_debug_fill((AuraCtx *)(intptr_t)ctxPtr);
+}
+
+JNIEXPORT void JNICALL
+Java_com_mossip_auraplayer_engine_AuraDComp_dcompTeardown(
+    JNIEnv *env, jobject thiz, jlong ctxPtr)
+{
+    (void)env; (void)thiz;
+    AuraCtx *c = (AuraCtx *)(intptr_t)ctxPtr;
+    aura_angle_teardown(c);   /* thread + mpv rctx + EGL first */
+    aura_dcomp_teardown(c);   /* then visuals + swapchains + devices */
+}
+
+#endif /* _WIN32 */
 
 JNIEXPORT jlong JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_createNative(
     JNIEnv *env, jobject thisObj)
 {
     if (!g_vm)
         (*env)->GetJavaVM(env, &g_vm);
-
     AuraCtx *c = (AuraCtx *)calloc(1, sizeof(AuraCtx));
     if (!c) return 0;
-
     c->jself = (*env)->NewGlobalRef(env, thisObj);
     c->mpv = mpv_create();
     if (!c->mpv) {
@@ -200,7 +218,6 @@ JNIEXPORT jlong JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_initializeN
     (void)obj;
     AuraCtx *c = ctx_of(handle);
     if (!c || !c->mpv) return 0;
-
     int64_t wid = 0;
 
     mpv_set_option_string(c->mpv, "demuxer-max-bytes",      "150M");
@@ -209,29 +226,33 @@ JNIEXPORT jlong JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_initializeN
     mpv_set_option_string(c->mpv, "hls-bitrate",            "max");
     mpv_set_option_string(c->mpv, "keep-open",              "yes");
     mpv_set_option_string(c->mpv, "audio-channels",         "stereo");
-    mpv_request_log_messages(c->mpv, "info");
+
+    /* [FIX-LOG] BOTH lines are needed:
+     *   msg-level  -> what mpv GENERATES
+     *   request    -> what is DELIVERED to our event loop
+     * Revert to "info" once debugging is done -- this is very chatty. */
+//     mpv_set_option_string(c->mpv, "msg-level", "all=v");
+//     mpv_request_log_messages(c->mpv, "debug");
 
     if (audioOnly) {
-            mpv_set_option_string(c->mpv, "vid", "no");
+        mpv_set_option_string(c->mpv, "vid", "no");
+    } else {
+        c->surface = aura_surface_attach(env, canvas, &wid);
+        if (c->surface && wid != 0) {
+            c->wid = wid;
+            mpv_set_option(c->mpv, "wid", MPV_FORMAT_INT64, &wid);
+            mpv_set_option_string(c->mpv, "vo",      "gpu-next");
+            mpv_set_option_string(c->mpv, "gpu-api", "vulkan");
+            const char *gctx = aura_platform_gpu_context();
+            if (gctx)
+                mpv_set_option_string(c->mpv, "gpu-context", gctx);
+            mpv_set_option_string(c->mpv, "hwdec", aura_platform_hwdec());
         } else {
-            c->surface = aura_surface_attach(env, canvas, &wid);
-            if (c->surface && wid != 0) {
-                c->wid = wid;
-                mpv_set_option(c->mpv, "wid", MPV_FORMAT_INT64, &wid);
-                mpv_set_option_string(c->mpv, "vo",      "gpu-next");
-                mpv_set_option_string(c->mpv, "gpu-api", "vulkan");
-
-                const char *gctx = aura_platform_gpu_context();
-                if (gctx)
-                    mpv_set_option_string(c->mpv, "gpu-context", gctx);
-
-                mpv_set_option_string(c->mpv, "hwdec", aura_platform_hwdec());
-            } else {
-                fprintf(stderr,
-                    "[AuraPlayer] Surface attach failed; mpv will open its own window\n");
-                mpv_set_option_string(c->mpv, "hwdec", "auto");
-            }
+            fprintf(stderr,
+                "[AuraPlayer] Surface attach failed; mpv will open its own window\n");
+            mpv_set_option_string(c->mpv, "hwdec", "auto");
         }
+    }
 
     mpv_observe_property(c->mpv, 0, "time-pos",               MPV_FORMAT_DOUBLE);
     mpv_observe_property(c->mpv, 0, "duration",               MPV_FORMAT_DOUBLE);
@@ -248,12 +269,12 @@ JNIEXPORT jlong JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_initializeN
         return 0;
     }
 
-    #ifdef _WIN32
-        c->thread = (HANDLE)_beginthreadex(NULL, 0, event_loop, c, 0, NULL);
-    #else
+#ifdef _WIN32
+    c->thread = (HANDLE)_beginthreadex(NULL, 0, event_loop, c, 0, NULL);
+#else
     if (pthread_create(&c->thread, NULL, event_loop, c) == 0)
         c->thread_started = 1;
-    #endif
+#endif
 
     fprintf(stderr, "[C] initializeNative -> returning wid=%p\n", (void*)(intptr_t)wid);
     fflush(stderr);
@@ -266,45 +287,34 @@ JNIEXPORT void JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_terminateNat
     (void)obj;
     AuraCtx *c = ctx_of(handle);
     if (!c) return;
-
     if (c->mpv) {
-        /* Ask mpv to quit; the event thread exits on MPV_EVENT_SHUTDOWN. */
         const char *cmd[] = {"quit", NULL};
         mpv_command_async(c->mpv, 0, cmd);
-
-        #ifdef _WIN32
+#ifdef _WIN32
         if (c->thread) {
             WaitForSingleObject(c->thread, INFINITE);
             CloseHandle(c->thread);
             c->thread = NULL;
         }
-        #else
+#else
         if (c->thread_started) {
             pthread_join(c->thread, NULL);
             c->thread_started = 0;
         }
-        #endif
-        /* Event thread is gone; now the handle is exclusively ours. */
+#endif
         mpv_terminate_destroy(c->mpv);
         c->mpv = NULL;
     }
-
-    /* Only safe AFTER mpv is fully destroyed. */
     if (c->surface) {
         aura_surface_detach(c->surface);
         c->surface = NULL;
     }
-
     if (c->jself) {
         (*env)->DeleteGlobalRef(env, c->jself);
         c->jself = NULL;
     }
     free(c);
 }
-
-/* ---------------------------------------------------------------------- */
-/* JNI: surface geometry                                                   */
-/* ---------------------------------------------------------------------- */
 
 JNIEXPORT void JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_updateSurfaceBounds(
     JNIEnv *env, jobject obj, jlong handle, jint x, jint y, jint w, jint h)
@@ -323,10 +333,6 @@ JNIEXPORT void JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_setSurfaceVi
     if (c && c->surface)
         aura_surface_set_visible(c->surface, visible ? 1 : 0);
 }
-
-/* ---------------------------------------------------------------------- */
-/* JNI: playback control / properties                                      */
-/* ---------------------------------------------------------------------- */
 
 JNIEXPORT void JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_loadFile(
     JNIEnv *env, jobject obj, jlong handle, jstring url)
@@ -456,25 +462,18 @@ JNIEXPORT jdoubleArray JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_getA
     return result;
 }
 
-/* ---------------------------------------------------------------------- */
-/* JNI: audio devices                                                      */
-/* ---------------------------------------------------------------------- */
-
 JNIEXPORT jobjectArray JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_getAudioDevices(
     JNIEnv *env, jobject obj, jlong handle)
 {
     (void)obj;
     AuraCtx *c = ctx_of(handle);
     if (!c || !c->mpv) return NULL;
-
     mpv_node node;
     if (mpv_get_property(c->mpv, "audio-device-list", MPV_FORMAT_NODE, &node) < 0)
         return NULL;
-
     jclass strCls = (*env)->FindClass(env, "java/lang/String");
     int count = node.u.list->num;
     jobjectArray arr = (*env)->NewObjectArray(env, count * 2, strCls, NULL);
-
     for (int i = 0; i < count; i++) {
         const char *name = "", *desc = "";
         mpv_node item = node.u.list->values[i];
@@ -503,10 +502,6 @@ JNIEXPORT void JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_setAudioDevi
     mpv_set_property_string(c->mpv, "audio-device", id);
     (*env)->ReleaseStringUTFChars(env, deviceId, id);
 }
-
-/* ---------------------------------------------------------------------- */
-/* JNI: tracks                                                             */
-/* ---------------------------------------------------------------------- */
 
 JNIEXPORT jint JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_getTrackCount(
     JNIEnv *env, jobject obj, jlong handle, jstring type)
@@ -540,33 +535,25 @@ JNIEXPORT jobjectArray JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_getN
     (void)obj;
     AuraCtx *c = ctx_of(handle);
     if (!c || !c->mpv) return NULL;
-
     mpv_node node;
     if (mpv_get_property(c->mpv, "track-list", MPV_FORMAT_NODE, &node) < 0) return NULL;
-
     if (node.format != MPV_FORMAT_NODE_ARRAY) {
         mpv_free_node_contents(&node);
         return NULL;
     }
-
     jclass trackClass = (*env)->FindClass(env, "com/mossip/auraplayer/engine/MediaTrack");
     jmethodID constructor = (*env)->GetMethodID(env, trackClass, "<init>",
         "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;II)V");
-
     int count = node.u.list->num;
     jobjectArray trackArray = (*env)->NewObjectArray(env, count, trackClass, NULL);
-
     for (int i = 0; i < count; i++) {
         mpv_node item = node.u.list->values[i];
         if (item.format != MPV_FORMAT_NODE_MAP) continue;
-
         const char *raw_id = NULL, *raw_type = NULL, *raw_title = NULL, *raw_lang = NULL;
         int width = 0, height = 0;
-
         for (int j = 0; j < item.u.list->num; j++) {
             char *key = item.u.list->keys[j];
             mpv_node val = item.u.list->values[j];
-
             if (val.format == MPV_FORMAT_STRING) {
                 if      (strcmp(key, "id")    == 0) raw_id    = val.u.string;
                 else if (strcmp(key, "type")  == 0) raw_type  = val.u.string;
@@ -577,25 +564,21 @@ JNIEXPORT jobjectArray JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_getN
                 else if (strcmp(key, "demux-h") == 0) height = (int)val.u.int64;
             }
         }
-
         jstring jId    = (*env)->NewStringUTF(env, raw_id    ? raw_id    : "");
         jstring jType  = (*env)->NewStringUTF(env, raw_type  ? raw_type  : "");
         jstring jTitle = (*env)->NewStringUTF(env, raw_title ? raw_title : "");
         jstring jLang  = (*env)->NewStringUTF(env, raw_lang  ? raw_lang  : "");
-
         jobject trackObj = (*env)->NewObject(env, trackClass, constructor,
                                              jId, jType, jTitle, jLang, width, height);
         if (trackObj) {
             (*env)->SetObjectArrayElement(env, trackArray, i, trackObj);
             (*env)->DeleteLocalRef(env, trackObj);
         }
-
         (*env)->DeleteLocalRef(env, jId);
         (*env)->DeleteLocalRef(env, jType);
         (*env)->DeleteLocalRef(env, jTitle);
         (*env)->DeleteLocalRef(env, jLang);
     }
-
     mpv_free_node_contents(&node);
     return trackArray;
 }

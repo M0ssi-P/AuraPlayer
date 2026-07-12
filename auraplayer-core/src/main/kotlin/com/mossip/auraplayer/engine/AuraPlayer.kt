@@ -9,7 +9,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.awt.Canvas
-import javax.swing.SwingUtilities
 
 /* ====================================================================== */
 /* Public types                                                            */
@@ -28,7 +27,6 @@ data class MediaTrack(
 
 data class AudioDevice(val id: String, val description: String)
 
-/** Where the host should place user controls for this surface. */
 enum class OverlayMode { OVER_VIDEO, DOCKED }
 
 data class Segment(
@@ -39,11 +37,6 @@ data class Segment(
 ) {
     enum class Kind { CHAPTER, INTRO, OUTRO, AD, CUSTOM }
 }
-
-/**
- * Implemented by the Compose host (AuraHostState). Lives in core so
- * AuraPlayer never depends on Compose types.
- */
 
 class AuraSurfaceEntry(
     val player: AuraPlayer,
@@ -58,20 +51,12 @@ class AuraSurfaceEntry(
     private val _isFullScreen = MutableStateFlow(false)
     val isFullscreen: StateFlow<Boolean> get() = _isFullScreen.asStateFlow()
 
-    val canvas: Canvas = Canvas().apply { background = java.awt.Color.RED }
+    val canvas: Canvas = Canvas().apply { background = java.awt.Color.BLACK }
     var initialized = false
 
-    fun setBounds(value: Any?) {
-        _bounds.value = value
-    }
-
-    fun setFullScreen(bool: Boolean) {
-        _isFullScreen.value = bool
-    }
-
-    fun setAttached(bool: Boolean) {
-        _attachedState.value = bool
-    }
+    fun setBounds(value: Any?) { _bounds.value = value }
+    fun setFullScreen(bool: Boolean) { _isFullScreen.value = bool }
+    fun setAttached(bool: Boolean) { _attachedState.value = bool }
 }
 
 interface AuraSurfaceHost {
@@ -86,57 +71,38 @@ interface AuraSurfaceHost {
 
 class AuraPlayer {
 
-    /* ----------------------------- state --------------------------------- */
-
     private val playerScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     private val _currentTime = MutableStateFlow(0.0)
     val currentTime = _currentTime.asStateFlow()
-
     private val _duration = MutableStateFlow(0.0)
     val duration = _duration.asStateFlow()
-
     private val _bufferDuration = MutableStateFlow(0.0)
     val bufferDuration = _bufferDuration.asStateFlow()
-
     private val _playerState = MutableStateFlow(PlayerState.IDLE)
     val playerState = _playerState.asStateFlow()
-
     private val _tracks = MutableStateFlow<List<MediaTrack>>(emptyList())
     val tracks = _tracks.asStateFlow()
-
     private val _volume = MutableStateFlow(100.0)
     val volume = _volume.asStateFlow()
-
     private val _isMuted = MutableStateFlow(false)
     val isMuted = _isMuted.asStateFlow()
-
     private val _speed = MutableStateFlow(1.0)
     val speed = _speed.asStateFlow()
-
     private val _fullscreen = MutableStateFlow(false)
     val fullscreen = _fullscreen.asStateFlow()
-
     private val _isInitialized = MutableStateFlow(false)
     val isInitialized = _isInitialized.asStateFlow()
 
-    /* --------------------------- native handle ---------------------------- */
-
-    /** Opaque AuraCtx* from native. 0 after release(). */
     private var handle: Long = 0L
 
-    /**
-     * Native video surface handle: HWND (Windows), CAMetalLayer* (macOS),
-     * X11 Window (Linux). 0 until initialize() or in audio-only mode.
-     */
     var videoHandle: Long = 0L
         private set
 
-    /** Set by the Compose host on register/unregister. */
     var host: AuraSurfaceHost? = null
 
-    var overlayMode: OverlayMode = OverlayMode.DOCKED
-        private set
+    private val _overlayMode = MutableStateFlow(OverlayMode.DOCKED)
+    val overlayMode: StateFlow<OverlayMode> = _overlayMode.asStateFlow()
 
     init {
         AuraPlayerLoader.load()
@@ -146,12 +112,12 @@ class AuraPlayer {
 
     /* ----------------------------- lifecycle ------------------------------ */
 
-    /** Must be called on the AWT EDT with a displayable canvas. */
     fun initialize(canvas: Canvas, audioOnly: Boolean) {
         if (_isInitialized.value || handle == 0L) return
         videoHandle = initializeNative(handle, canvas, audioOnly)
         println("INIT: ctx=$handle wid=$videoHandle")
-        overlayMode = enableUnderlayIfSupported()
+        _overlayMode.value = enableUnderlayIfSupported()
+        println(overlayMode)
         _isInitialized.value = true
         if (!audioOnly && videoHandle == 0L) {
             System.err.println("[AuraPlayer] embedding failed; mpv opened detached window")
@@ -176,8 +142,8 @@ class AuraPlayer {
 
     private fun setFullscreenInternal(enabled: Boolean) {
         val h = host ?: return
-        h.setFullscreen(this, enabled)          // surface -> fills the window
-        h.setWindowFullscreen(this, enabled)    // window  -> fills the screen
+        h.setFullscreen(this, enabled)
+        h.setWindowFullscreen(this, enabled)
         _fullscreen.value = enabled
     }
 
@@ -189,12 +155,11 @@ class AuraPlayer {
             enableUnderlay(videoHandle)
             OverlayMode.OVER_VIDEO
         }
-        // Flip to OVER_VIDEO once the SetWindowRgn spike is confirmed on Windows.
+        Os.current == Os.WINDOWS -> OverlayMode.OVER_VIDEO  // region-cut verified
         else -> OverlayMode.DOCKED
     }
 
     fun clearUnderlay(rootWindowHandle: Long, holeIndex: Int) {
-        // enable=false clears the slot; video handle may already be gone.
         setUnderlay(rootWindowHandle, videoHandle, holeIndex, 0, 0, 0, 0, false)
     }
 
@@ -206,15 +171,11 @@ class AuraPlayer {
     fun seek(seconds: Double) = setPropertyDouble(handle, "time-pos", seconds)
     fun setVolume(v: Double) = setPropertyDouble(handle, "volume", v)
     fun setSpeed(s: Double) = setPropertyDouble(handle, "speed", s)
-
     fun setTrack(type: String, id: String) = setTrack(handle, type, id)
-
     fun updateSurfaceBounds(x: Int, y: Int, w: Int, h: Int) =
         updateSurfaceBounds(handle, x, y, w, h)
-
     fun setSurfaceVisible(visible: Boolean) = setSurfaceVisible(handle, visible)
 
-    /* Sync reads: NOT for the UI thread -- UI reads the StateFlows above. */
     suspend fun getPropertyDoubleAsync(name: String): Double =
         kotlinx.coroutines.withContext(Dispatchers.Default) {
             getPropertyDouble(handle, name)
@@ -227,7 +188,6 @@ class AuraPlayer {
     fun setAudioDevice(device: AudioDevice) = setAudioDevice(handle, device.id)
 
     /* ------------------- callbacks (from native event thread) ------------- */
-    /* StateFlow writes are thread-safe; Compose collects them normally.      */
 
     fun onNativeTimeChange(time: Double) { _currentTime.value = time }
     fun onNativeDurationChange(d: Double) { _duration.value = d }
@@ -256,12 +216,11 @@ class AuraPlayer {
     }
 
     /* ------------------------------ natives -------------------------------- */
-    /* Signatures must match native_player.c / native_surface_*.c exactly.     */
+    /* Signatures must match native_render.c / jawt_*.c|m exactly.             */
 
     private external fun createNative(): Long
     private external fun initializeNative(handle: Long, canvas: Canvas, audioOnly: Boolean): Long
     private external fun terminateNative(handle: Long)
-
     private external fun loadFile(handle: Long, url: String)
     private external fun setPause(handle: Long, pause: Boolean)
     private external fun setMute(handle: Long, mute: Boolean)
@@ -286,13 +245,15 @@ class AuraPlayer {
     external fun dcompCommit(ctx: Long)
     external fun dcompTeardown(ctx: Long)
 
-    /* Platform extras (no-op symbols exist on every platform) */
-    private external fun enableUnderlay(videoLayerPtr: Long)                    // macOS
-    external fun setUnderlay(rootHandle: Long, videoHandle: Long, index: Int,   // Windows
-                             x: Int, y: Int, w: Int, h: Int, enable: Boolean)
-    external fun setBorderlessFullscreen(windowHandle: Long, enable: Boolean)   // Win + X11
+    /* [FIX-DCOMP] Removed dcompInit/dcompAttachUiSwapchain/dcompSetVideoRect/
+     * dcompCommit/dcompTeardown: no native implementation exists yet, so any
+     * call would throw UnsatisfiedLinkError. Reintroduce together with the
+     * DirectComposition backend when (if) that work starts. */
 
-    /* ------------------------------- misc ---------------------------------- */
+    private external fun enableUnderlay(videoLayerPtr: Long)                    // macOS
+    external fun setUnderlay(rootHandle: Long, videoHandle: Long, index: Int,   // Windows (stub on mac/linux)
+                             x: Int, y: Int, w: Int, h: Int, enable: Boolean)
+    external fun setBorderlessFullscreen(windowHandle: Long, enable: Boolean)   // all platforms
 
     private enum class Os {
         WINDOWS, MACOS, LINUX;

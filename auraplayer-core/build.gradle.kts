@@ -107,6 +107,7 @@ val compileNative by tasks.registering(Exec::class) {
 
         os.isMacOsX -> listOf(
             "clang", "-dynamiclib", "-fPIC",
+            "-fobjc-arc",
             "-o", outputFile.absolutePath,
             "${nativeSrcDir.absolutePath}/native_render.c",
             "${nativeSrcDir.absolutePath}/jawt_macos.m",
@@ -122,7 +123,8 @@ val compileNative by tasks.registering(Exec::class) {
             "-framework", "Foundation",
             "-framework", "OpenGL",
             "-framework", "CoreGraphics",
-            "-framework", "CoreVideo"
+            "-framework", "CoreVideo",
+            "-framework", "Metal",
         )
 
         else -> listOf(
