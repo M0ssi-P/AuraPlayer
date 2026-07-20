@@ -40,13 +40,15 @@ static int get_internal_state(AuraCtx *c)
     mpv_get_property(c->mpv, "pause",     MPV_FORMAT_FLAG, &paused);
     mpv_get_property(c->mpv, "core-idle", MPV_FORMAT_FLAG, &core_idle);
     mpv_get_property(c->mpv, "seeking",   MPV_FORMAT_FLAG, &seeking);
+
     if (seeking) return STATE_SEEKING;
+    if (paused)  return STATE_PAUSED;
     if (core_idle) {
         double duration = 0;
         mpv_get_property(c->mpv, "duration", MPV_FORMAT_DOUBLE, &duration);
         return (duration <= 0) ? STATE_LOADING : STATE_BUFFERING;
     }
-    return paused ? STATE_PAUSED : STATE_PLAYING;
+    return STATE_PLAYING;
 }
 
 #ifdef _WIN32
@@ -164,6 +166,15 @@ Java_com_mossip_auraplayer_engine_AuraDComp_dcompAttachUiSwapchain(
                          (IDXGISwapChain3 *)(intptr_t)swapchainPtr);
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_mossip_auraplayer_engine_AuraDComp_uiCreateSwapchainD3d12(
+        JNIEnv *env, jclass clazz, jlong ctx, jint w, jint h)
+{
+    AuraCtx *c = (AuraCtx *)(intptr_t)ctx;
+    int ok = aura_ui_create_swapchain_d3d12(c, (int)w, (int)h);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT void JNICALL
 Java_com_mossip_auraplayer_engine_AuraDComp_dcompCommit(
     JNIEnv *env, jobject thiz, jlong ctxPtr)
@@ -181,14 +192,45 @@ Java_com_mossip_auraplayer_engine_AuraDComp_dcompDebugFill(
     aura_dcomp_debug_fill((AuraCtx *)(intptr_t)ctxPtr);
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_mossip_auraplayer_engine_AuraDComp_uiCreateSwapchain(
+        JNIEnv *env, jclass clazz, jlong ctx, jint w, jint h)
+{
+    AuraCtx *c = (AuraCtx *)(intptr_t)ctx;
+    return aura_ui_create_swapchain(c, (int)w, (int)h) ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_com_mossip_auraplayer_engine_AuraDComp_uiTestFill(
+        JNIEnv *env, jclass clazz, jlong ctx)
+{
+    aura_ui_test_fill((AuraCtx *)(intptr_t)ctx);
+}
+
 JNIEXPORT void JNICALL
 Java_com_mossip_auraplayer_engine_AuraDComp_dcompTeardown(
     JNIEnv *env, jobject thiz, jlong ctxPtr)
 {
     (void)env; (void)thiz;
+
+    if (ctxPtr == 0) {
+        // Works anywhere on Windows without custom header dependencies
+        OutputDebugStringA("AuraPlayer [Native]: dcompTeardown - Received NULL context pointer, ignoring.\n");
+        return;
+    }
+
     AuraCtx *c = (AuraCtx *)(intptr_t)ctxPtr;
-    aura_angle_teardown(c);   /* thread + mpv rctx + EGL first */
-    aura_dcomp_teardown(c);   /* then visuals + swapchains + devices */
+    if (!c) return;
+
+    OutputDebugStringA("AuraPlayer [Native]: Beginning pipeline teardown.\n");
+
+    if (c->mpv_rctx || c->egl_ctx) {
+        aura_angle_teardown(c);
+    }
+
+    aura_dcomp_teardown(c);
+
+    OutputDebugStringA("AuraPlayer [Native]: Pipeline teardown complete.\n");
 }
 
 #endif /* _WIN32 */
@@ -220,40 +262,100 @@ JNIEXPORT jlong JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_initializeN
     if (!c || !c->mpv) return 0;
     int64_t wid = 0;
 
+        mpv_set_option_string(c->mpv, "demuxer-max-bytes",      "150M");
+        mpv_set_option_string(c->mpv, "demuxer-max-back-bytes", "50M");
+        mpv_set_option_string(c->mpv, "ytdl",                   "yes");
+        mpv_set_option_string(c->mpv, "hls-bitrate",            "max");
+        mpv_set_option_string(c->mpv, "keep-open",              "yes");
+        mpv_set_option_string(c->mpv, "audio-channels",         "stereo");
+        mpv_set_option_string(c->mpv, "msg-level",              "all=v");
+        mpv_set_option_string(c->mpv, "log-file",               "/tmp/mpv.log");
+        mpv_request_log_messages(c->mpv, "info");
+
+        if (audioOnly) {
+            mpv_set_option_string(c->mpv, "vid", "no");
+        } else {
+            c->surface = aura_surface_attach(env, canvas, &wid);
+            if (c->surface && wid != 0) {
+                c->wid = wid;
+                mpv_set_option(c->mpv, "wid", MPV_FORMAT_INT64, &wid);
+                mpv_set_option_string(c->mpv, "vo",      "gpu-next");
+                mpv_set_option_string(c->mpv, "gpu-api", "vulkan");
+                const char *gctx = aura_platform_gpu_context();
+                if (gctx)
+                    mpv_set_option_string(c->mpv, "gpu-context", gctx);
+                mpv_set_option_string(c->mpv, "hwdec", aura_platform_hwdec());
+            } else {
+                fprintf(stderr,
+                    "[AuraPlayer] Surface attach failed; mpv will open its own window\n");
+                mpv_set_option_string(c->mpv, "hwdec", "auto");
+            }
+        }
+
+        mpv_observe_property(c->mpv, 0, "time-pos",               MPV_FORMAT_DOUBLE);
+        mpv_observe_property(c->mpv, 0, "duration",               MPV_FORMAT_DOUBLE);
+        mpv_observe_property(c->mpv, 0, "pause",                  MPV_FORMAT_FLAG);
+        mpv_observe_property(c->mpv, 0, "core-idle",              MPV_FORMAT_FLAG);
+        mpv_observe_property(c->mpv, 0, "seeking",                MPV_FORMAT_FLAG);
+        mpv_observe_property(c->mpv, 0, "demuxer-cache-duration", MPV_FORMAT_DOUBLE);
+        mpv_observe_property(c->mpv, 0, "volume",                 MPV_FORMAT_DOUBLE);
+        mpv_observe_property(c->mpv, 0, "mute",                   MPV_FORMAT_FLAG);
+        mpv_observe_property(c->mpv, 0, "speed",                  MPV_FORMAT_DOUBLE);
+
+        if (mpv_initialize(c->mpv) < 0) {
+            fprintf(stderr, "[AuraPlayer] mpv_initialize failed\n");
+            return 0;
+        }
+
+    #ifdef _WIN32
+        c->thread = (HANDLE)_beginthreadex(NULL, 0, event_loop, c, 0, NULL);
+    #else
+        if (pthread_create(&c->thread, NULL, event_loop, c) == 0)
+            c->thread_started = 1;
+    #endif
+
+    fprintf(stderr, "[C] initializeNative -> returning wid=%p\n", (void*)(intptr_t)wid);
+    fflush(stderr);
+    return (jlong)wid;
+}
+
+JNIEXPORT void JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_initializeRenderApiNative(
+    JNIEnv *env, jobject thiz, jlong handle)
+{
+    (void)env; (void)thiz;
+    AuraCtx *c = ctx_of(handle);
+    if (!c || !c->mpv) return;
+
+    /* --- shared options: identical to initializeNative --- */
     mpv_set_option_string(c->mpv, "demuxer-max-bytes",      "150M");
     mpv_set_option_string(c->mpv, "demuxer-max-back-bytes", "50M");
     mpv_set_option_string(c->mpv, "ytdl",                   "yes");
     mpv_set_option_string(c->mpv, "hls-bitrate",            "max");
     mpv_set_option_string(c->mpv, "keep-open",              "yes");
     mpv_set_option_string(c->mpv, "audio-channels",         "stereo");
+    mpv_set_property_string(c->mpv, "terminal", "yes");
+    mpv_set_option_string(c->mpv, "ytdl",                   "yes");
 
-    /* [FIX-LOG] BOTH lines are needed:
-     *   msg-level  -> what mpv GENERATES
-     *   request    -> what is DELIVERED to our event loop
-     * Revert to "info" once debugging is done -- this is very chatty. */
-//     mpv_set_option_string(c->mpv, "msg-level", "all=v");
-//     mpv_request_log_messages(c->mpv, "debug");
+    /* --- render-API path: REPLACES the whole audioOnly/surface branch ---
+     * No JAWT, no canvas, no wid, no gpu-api/gpu-context: mpv never owns
+     * a window. vo=libmpv puts mpv in render-API mode; frames are pulled
+     * by mpv_render_context (created later by dcompCreateRenderContext). */
+    mpv_set_option_string(c->mpv, "vo", "libmpv");
+    mpv_set_option_string(c->mpv, "target-colorspace-hint", "no");
+    mpv_set_option_string(c->mpv, "d3d11-output-format", "rgb10_a2");
+    #ifdef _WIN32
+        mpv_set_option_string(c->mpv, "hwdec", "d3d11va-copy");  /* -> ANGLE interop */
+    #else
+        mpv_set_option_string(c->mpv, "hwdec", "auto-safe");
+    #endif
 
-    if (audioOnly) {
-        mpv_set_option_string(c->mpv, "vid", "no");
-    } else {
-        c->surface = aura_surface_attach(env, canvas, &wid);
-        if (c->surface && wid != 0) {
-            c->wid = wid;
-            mpv_set_option(c->mpv, "wid", MPV_FORMAT_INT64, &wid);
-            mpv_set_option_string(c->mpv, "vo",      "gpu-next");
-            mpv_set_option_string(c->mpv, "gpu-api", "vulkan");
-            const char *gctx = aura_platform_gpu_context();
-            if (gctx)
-                mpv_set_option_string(c->mpv, "gpu-context", gctx);
-            mpv_set_option_string(c->mpv, "hwdec", aura_platform_hwdec());
-        } else {
-            fprintf(stderr,
-                "[AuraPlayer] Surface attach failed; mpv will open its own window\n");
-            mpv_set_option_string(c->mpv, "hwdec", "auto");
-        }
+    if (c->hdr_active) {
+        mpv_set_option_string(c->mpv, "tone-mapping", "spline");
+        mpv_set_option_string(c->mpv, "target-trc",   "srgb");
+        mpv_set_option_string(c->mpv, "target-prim",  "bt.709");
     }
 
+    /* --- observes: identical to initializeNative --- */
     mpv_observe_property(c->mpv, 0, "time-pos",               MPV_FORMAT_DOUBLE);
     mpv_observe_property(c->mpv, 0, "duration",               MPV_FORMAT_DOUBLE);
     mpv_observe_property(c->mpv, 0, "pause",                  MPV_FORMAT_FLAG);
@@ -265,20 +367,19 @@ JNIEXPORT jlong JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_initializeN
     mpv_observe_property(c->mpv, 0, "speed",                  MPV_FORMAT_DOUBLE);
 
     if (mpv_initialize(c->mpv) < 0) {
-        fprintf(stderr, "[AuraPlayer] mpv_initialize failed\n");
-        return 0;
+        fprintf(stderr, "[AuraPlayer] mpv_initialize failed (render-api)\n");
+        return;
     }
 
-#ifdef _WIN32
-    c->thread = (HANDLE)_beginthreadex(NULL, 0, event_loop, c, 0, NULL);
-#else
-    if (pthread_create(&c->thread, NULL, event_loop, c) == 0)
-        c->thread_started = 1;
-#endif
-
-    fprintf(stderr, "[C] initializeNative -> returning wid=%p\n", (void*)(intptr_t)wid);
+    /* --- event thread: identical to initializeNative --- */
+    #ifdef _WIN32
+        c->thread = (HANDLE)_beginthreadex(NULL, 0, event_loop, c, 0, NULL);
+    #else
+        if (pthread_create(&c->thread, NULL, event_loop, c) == 0)
+            c->thread_started = 1;
+    #endif
+    fprintf(stderr, "[C] initializeRenderApiNative -> ctx=%p (no wid)\n", (void *)c);
     fflush(stderr);
-    return (jlong)wid;
 }
 
 JNIEXPORT void JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_terminateNative(
@@ -290,18 +391,23 @@ JNIEXPORT void JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_terminateNat
     if (c->mpv) {
         const char *cmd[] = {"quit", NULL};
         mpv_command_async(c->mpv, 0, cmd);
-#ifdef _WIN32
-        if (c->thread) {
-            WaitForSingleObject(c->thread, INFINITE);
-            CloseHandle(c->thread);
-            c->thread = NULL;
-        }
-#else
-        if (c->thread_started) {
-            pthread_join(c->thread, NULL);
-            c->thread_started = 0;
-        }
-#endif
+        #ifdef _WIN32
+            if (c->thread) {
+                WaitForSingleObject(c->thread, INFINITE);
+                CloseHandle(c->thread);
+                c->thread = NULL;
+            }
+
+            if (c->dcomp_dev) {
+                aura_angle_teardown(c);
+                aura_dcomp_teardown(c);
+            }
+        #else
+            if (c->thread_started) {
+                pthread_join(c->thread, NULL);
+                c->thread_started = 0;
+            }
+        #endif
         mpv_terminate_destroy(c->mpv);
         c->mpv = NULL;
     }

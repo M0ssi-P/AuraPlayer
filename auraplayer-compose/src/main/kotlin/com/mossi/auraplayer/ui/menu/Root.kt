@@ -1,5 +1,6 @@
 package com.mossi.auraplayer.ui.menu
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -32,7 +33,7 @@ sealed interface MenuPage {
 @Composable
 fun RootPage(player: AuraPlayer, onNavigate: (MenuPage) -> Unit) {
     val speed by player.speed.collectAsState()
-    Column(Modifier.padding(vertical = 8.dp)) {
+    Column(Modifier.width(400.dp).padding(vertical = 8.dp)) {
         MenuRow("icons/caption.svg", "Subtitles/CC", "English",
             onClick = { onNavigate(MenuPage.Subtitles) })
         MenuRow("icons/speed.svg", "Playback speed",
@@ -40,6 +41,9 @@ fun RootPage(player: AuraPlayer, onNavigate: (MenuPage) -> Unit) {
             onClick = { onNavigate(MenuPage.Speed) })
         MenuRow("icons/quality.svg", "Quality", "Auto (480p)",
             onClick = { onNavigate(MenuPage.Quality) })
+        MenuRow("icons/speed.svg", "Audio devices",
+            if (speed == 1.0) "Normal" else "${speed}x",
+            onClick = { onNavigate(MenuPage.AudioDevice) })
     }
 }
 

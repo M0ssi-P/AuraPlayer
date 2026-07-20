@@ -31,6 +31,10 @@ object AuraPlayerLoader {
             // 3. Load MPV and Renderer
             val mpvName = if (os.contains("win")) "libmpv-2" else "libmpv"
             extractAndLoad("/nativelibs/$folder/$mpvName$extension")
+            if (os.contains("win")) {
+                extractAndLoad("/nativelibs/$folder/libEGL$extension")
+                extractAndLoad("/nativelibs/$folder/libGLESv2$extension")
+            }
             extractAndLoad("/nativelibs/$folder/native_render$extension")
 
             isLoaded = true

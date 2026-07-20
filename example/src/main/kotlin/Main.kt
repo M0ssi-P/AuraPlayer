@@ -25,6 +25,9 @@ fun main() {
         val state = rememberWindowState()
         val  hasPlayerInitialized by engine.isInitialized.collectAsState()
 
+        // HLS URL to test out - https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8
+        // YT URL to test out https://www.youtube.com/watch?v=866LIJWme2M&list=RD866LIJWme2M&start_radio=1
+
         LaunchedEffect(hasPlayerInitialized) {
             if(hasPlayerInitialized) {
                 engine.loadFile("https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8")
@@ -42,8 +45,7 @@ fun main() {
                     e.type == KeyEventType.KeyDown && e.key == Key.F11 -> {
                         engine.toggleFullscreen(); true
                     }
-                    e.type == KeyEventType.KeyDown && e.key == Key.Escape &&
-                            engine.fullscreen.value -> {
+                    e.type == KeyEventType.KeyDown && e.key == Key.Escape && engine.fullscreen.value -> {
                         engine.exitFullscreen(); true
                     }
                     else -> false
@@ -51,7 +53,7 @@ fun main() {
             }
         ) {
             AuraPlayerHost(window) {
-                Column(Modifier.fillMaxSize().background(Color.White)) {
+                Column(Modifier.fillMaxSize()) {
                     // 3. Nest the surface anywhere, any depth. First composition
                     //    attaches the native surface and initializes mpv.
                     AuraPlayerSurface(

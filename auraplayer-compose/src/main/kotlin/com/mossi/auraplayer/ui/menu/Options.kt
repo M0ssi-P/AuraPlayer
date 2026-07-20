@@ -1,10 +1,13 @@
 package com.mossi.auraplayer.ui.menu
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -21,13 +24,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.mossi.auraplayer.ui.logo.Check
 import com.mossip.auraplayer.engine.AuraPlayer
 
 @Composable
 fun SubtitleOptions(player: AuraPlayer) {
     val tracks by player.tracks.collectAsState()
     val subs = tracks.filter { it.type == "sub" }
-    Column {
+    Column(modifier = Modifier.fillMaxWidth()) {
         OptionRow("Off", selected = false) { player.setTrack("sid", "no") }
         subs.forEach { t ->
             OptionRow(t.title.ifBlank { t.lang ?: "Track ${t.id}" }, selected = false) {
@@ -50,7 +54,7 @@ fun SpeedOptions(player: AuraPlayer) {
 }
 
 @Composable
-private fun AudioDeviceOptions(player: AuraPlayer) {
+fun AudioDeviceOptions(player: AuraPlayer) {
     // Enumerated once when the page opens; devices change rarely.
     val devices = remember { player.audioDevices() }
     Column {
@@ -68,9 +72,9 @@ private fun OptionRow(label: String, selected: Boolean, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
-//            if (selected) Icon(
-//                painterResource("icons/check.svg"), null, tint = Color.White,
-//                modifier = Modifier.size(16.dp))
+            if (selected) Icon(
+                Check(Color.White), null, tint = Color.Unspecified,
+                modifier = Modifier.size(16.dp))
         }
         Spacer(Modifier.width(16.dp))
         Text(label, color = Color.White, fontSize = 14.sp)

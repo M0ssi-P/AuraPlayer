@@ -44,6 +44,7 @@ class AuraSurfaceEntry(
 ) {
     private var _bounds = MutableStateFlow<Any?>(null)
     val bounds: StateFlow<Any?> get() = _bounds.asStateFlow()
+    var uiVideoRect: java.awt.Rectangle? = null
 
     private val _attachedState = MutableStateFlow(false)
     val attachedState: StateFlow<Boolean> get() = _attachedState.asStateFlow()
@@ -53,6 +54,14 @@ class AuraSurfaceEntry(
 
     val canvas: Canvas = Canvas().apply { background = java.awt.Color.BLACK }
     var initialized = false
+    var usesDComp = false
+    var dcompRenderStarted = false
+    @Volatile var tornDown = false
+    var lastX = Int.MIN_VALUE
+    var lastY = Int.MIN_VALUE
+    var lastW = 0
+    var lastH = 0
+    var uiInitialized = false
 
     fun setBounds(value: Any?) { _bounds.value = value }
     fun setFullScreen(bool: Boolean) { _isFullScreen.value = bool }
@@ -95,6 +104,7 @@ class AuraPlayer {
     val isInitialized = _isInitialized.asStateFlow()
 
     private var handle: Long = 0L
+    val nativeCtx: Long get() = handle
 
     var videoHandle: Long = 0L
         private set
@@ -122,6 +132,20 @@ class AuraPlayer {
         if (!audioOnly && videoHandle == 0L) {
             System.err.println("[AuraPlayer] embedding failed; mpv opened detached window")
         }
+    }
+
+    /* [DCOMP] mpv init for the render-API path: same option setup as
+     * initialize(), but NO canvas, NO JAWT, NO --wid — mpv never gets a
+     * window. The render context is created later (dcompCreateRenderContext)
+     * once the first video rect exists. Called by AuraHostState.register()
+     * after dcompInit succeeds. */
+    fun initializeRenderApi() {
+        if (_isInitialized.value || handle == 0L) return
+        initializeRenderApiNative(handle)
+        println("INIT: ctx=$handle (render-api, no wid)")
+        /* DComp composites with per-pixel alpha — overlay always available. */
+        _overlayMode.value = OverlayMode.OVER_VIDEO
+        _isInitialized.value = true
     }
 
     fun release() {
@@ -220,6 +244,9 @@ class AuraPlayer {
 
     private external fun createNative(): Long
     private external fun initializeNative(handle: Long, canvas: Canvas, audioOnly: Boolean): Long
+    /* [DCOMP] mpv handle init without wid/JAWT — see initializeRenderApi().
+     * C symbol: Java_com_mossip_auraplayer_engine_AuraPlayer_initializeRenderApiNative */
+    private external fun initializeRenderApiNative(handle: Long)
     private external fun terminateNative(handle: Long)
     private external fun loadFile(handle: Long, url: String)
     private external fun setPause(handle: Long, pause: Boolean)
@@ -238,17 +265,6 @@ class AuraPlayer {
     private external fun getNativeTracks(handle: Long): Array<MediaTrack>?
     private external fun updateSurfaceBounds(handle: Long, x: Int, y: Int, w: Int, h: Int)
     private external fun setSurfaceVisible(handle: Long, visible: Boolean)
-
-    external fun dcompInit(ctx: Long, topLevelHwnd: Long): Boolean
-    external fun dcompAttachUiSwapchain(ctx: Long, swapchainPtr: Long)
-    external fun dcompSetVideoRect(ctx: Long, x: Int, y: Int, w: Int, h: Int)
-    external fun dcompCommit(ctx: Long)
-    external fun dcompTeardown(ctx: Long)
-
-    /* [FIX-DCOMP] Removed dcompInit/dcompAttachUiSwapchain/dcompSetVideoRect/
-     * dcompCommit/dcompTeardown: no native implementation exists yet, so any
-     * call would throw UnsatisfiedLinkError. Reintroduce together with the
-     * DirectComposition backend when (if) that work starts. */
 
     private external fun enableUnderlay(videoLayerPtr: Long)                    // macOS
     external fun setUnderlay(rootHandle: Long, videoHandle: Long, index: Int,   // Windows (stub on mac/linux)

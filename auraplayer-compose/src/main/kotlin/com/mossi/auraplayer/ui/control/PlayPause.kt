@@ -13,9 +13,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.mossi.auraplayer.ui.logo.AuraPlayerIcons
+import com.mossi.auraplayer.ui.logo.Pause
+import com.mossi.auraplayer.ui.logo.Play
 import com.mossip.auraplayer.engine.AuraPlayer
 import com.mossip.auraplayer.engine.PlayerState
 
@@ -30,7 +35,7 @@ fun PlayPause(
     val isPlaying = state == PlayerState.PLAYING
     val isBusy = state == PlayerState.LOADING || state == PlayerState.BUFFERING
 
-    Box(modifier.size(size), contentAlignment = Alignment.Center) {
+    Box(modifier.pointerHoverIcon(PointerIcon.Hand).size(size), contentAlignment = Alignment.Center) {
         if (isBusy) {
             CircularProgressIndicator(
                 Modifier.size(size * 0.6f), color = tint, strokeWidth = 2.dp
@@ -39,12 +44,12 @@ fun PlayPause(
             IconButton(onClick = { player.setPause(isPlaying) }) {
                 // Crossfade so the glyph swap doesn't pop
                 Crossfade(isPlaying, animationSpec = tween(120), label = "playpause") { playing ->
-//                    Icon(
-//                        painterResource(if (playing)"icons/pause.svg" else "icons/play.svg"),
-//                        contentDescription = if (playing) "Pause" else "Play",
-//                        tint = tint,
-//                        modifier = Modifier.size(size * 0.7f),
-//                    )
+                    Icon(
+                        imageVector = if (isPlaying) Pause(tint) else Play(tint),
+                        contentDescription = if (playing) "Pause" else "Play",
+                        tint = Color.Unspecified,
+                        modifier = Modifier.size(size * 0.7f),
+                    )
                 }
             }
         }

@@ -97,12 +97,15 @@ val compileNative by tasks.registering(Exec::class) {
             "-o", outputFile.absolutePath,
             "${nativeSrcDir.absolutePath}/jawt_win.c",
             "${nativeSrcDir.absolutePath}/native_render.c",
+            "${nativeSrcDir.absolutePath}/dcomp_win.cpp",
+            "${nativeSrcDir.absolutePath}/dcomp_ui.cpp",
+            "${nativeSrcDir.absolutePath}/angle_win.c",
             "-I", "C:/deps/mpv-sdk/include",
             "-I", "$jdkHome/include",
             "-I", "$jdkHome/include/win32",
             "C:/deps/mpv-sdk/libmpv.dll.a",
             "$jdkHome/lib/jawt.lib",
-            "-lgdi32", "-luser32"
+            "-lgdi32", "-luser32", "-ld3d11", "-ldxgi", "-ld3d12", "-luuid"
         )
 
         os.isMacOsX -> listOf(
@@ -165,6 +168,10 @@ val copyMpvBinaries by tasks.registering(Copy::class) {
     }
 
     from(sourceFile)
+    if(os.isWindows) {
+        from(file("${nativeSrcDir.absolutePath}/libEGL.dll"))
+        from(file("${nativeSrcDir.absolutePath}/libGLESv2.dll"))
+    }
     into(File(nativeResDir, getCurrentPlatform()))
 }
 

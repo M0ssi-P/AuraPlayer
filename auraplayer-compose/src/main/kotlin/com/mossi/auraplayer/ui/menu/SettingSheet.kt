@@ -8,6 +8,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.Surface
@@ -32,7 +33,8 @@ fun SettingsSheet(player: AuraPlayer, onDismiss: () -> Unit) {
     Surface(
         color = Color(0xF01F1F1F),
         shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.widthIn(min = 220.dp)   // let content decide the rest
+        modifier = Modifier.widthIn(min = 220.dp, max = 320.dp)
+            .heightIn(max = 340.dp)
     ) {
         AnimatedContent(
             targetState = current,
@@ -65,7 +67,7 @@ fun SettingsSheet(player: AuraPlayer, onDismiss: () -> Unit) {
 //                    QualityOptions(player)
                 }
                 MenuPage.AudioDevice -> SubPage("Audio devices", onBack = { depth = stack.size; stack.removeLast() }) {
-
+                    AudioDeviceOptions(player)
                 }
             }
         }
