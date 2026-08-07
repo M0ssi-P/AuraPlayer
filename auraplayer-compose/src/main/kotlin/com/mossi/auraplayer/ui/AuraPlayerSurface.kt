@@ -178,6 +178,7 @@ class AuraHostState internal constructor(
                 entry.uiInitialized = false
 
             } else {
+                entry.cancelResize()
                 entry.player.release()
                 uiLayers[entry]?.dispose()
                 entry.uiInitialized = false
@@ -254,18 +255,15 @@ fun AuraPlayerSurface(
         modifier = modifier
             .onGloballyPositioned {
                 entry.setBounds(it.boundsInRoot())
-                SwingUtilities.invokeLater {
+                val work = Runnable {
                     if (!entry.tornDown) {
-                        applyGeometry(host, listOf(entry to entry.toGeom()), density, {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                            ) {
-                                controls()
-                            }
-                        })
+                        applyGeometry(host, listOf(entry to entry.toGeom()), density) {
+                            Box(Modifier.fillMaxSize()) { controls() }
+                        }
                     }
                 }
+                if (SwingUtilities.isEventDispatchThread()) work.run()
+                else SwingUtilities.invokeLater(work)
             }
             .then(
                 if (overVideo && (isMac || entry.usesDComp)) {
@@ -387,6 +385,7 @@ private fun applyGeometry(
             if (needsHole) entry.player.clearUnderlay(host.windowHandle, geom.holeIndex)
             continue
         }
+
         val full = geom.fullscreen
         val cx = if (full) 0 else (r.x / density).roundToInt()
         val cy = if (full) 0 else (r.y / density).roundToInt()
@@ -394,7 +393,7 @@ private fun applyGeometry(
         val ch = if (full) skikoH else (r.height / density).roundToInt()
         println("GEOM canvas=($cx,$cy ${cw}x$ch)")
         entry.canvas.setBounds(cx, cy, cw, ch)
-        entry.player.updateSurfaceBounds(cx, cy, cw, ch)
+        entry.onGeometryPass(cw, ch)
 
         if (needsHole) {
             val hx = if (full) 0 else r.x

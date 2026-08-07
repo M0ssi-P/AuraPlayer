@@ -1,4 +1,3 @@
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -8,7 +7,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.window.Window
@@ -24,6 +22,7 @@ fun main() {
         val engine = remember { AuraPlayer() }
         val state = rememberWindowState()
         val  hasPlayerInitialized by engine.isInitialized.collectAsState()
+        val isFullscreen by engine.fullscreen.collectAsState()
 
         // HLS URL to test out - https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8
         // YT URL to test out https://www.youtube.com/watch?v=866LIJWme2M&list=RD866LIJWme2M&start_radio=1
@@ -58,8 +57,8 @@ fun main() {
                     //    attaches the native surface and initializes mpv.
                     AuraPlayerSurface(
                         engine,
-                        modifier = Modifier
-                            .aspectRatio(16f / 9f)
+                        modifier = if (isFullscreen) Modifier.fillMaxSize()
+                        else Modifier.aspectRatio(16f / 9f)
                             .align(Alignment.CenterHorizontally),
                         controls = {
                             AuraControlBar(

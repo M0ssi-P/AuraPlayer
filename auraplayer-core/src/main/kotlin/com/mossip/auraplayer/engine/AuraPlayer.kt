@@ -2,13 +2,17 @@ package com.mossip.auraplayer.engine
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.awt.Canvas
+import kotlin.time.Duration.Companion.milliseconds
 
 /* ====================================================================== */
 /* Public types                                                            */
@@ -62,6 +66,52 @@ class AuraSurfaceEntry(
     var lastW = 0
     var lastH = 0
     var uiInitialized = false
+
+    private val resizeScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private var resizeJob: Job? = null
+
+    private var lastPushAt = 0L
+
+    fun pushSizeDebounced(w: Int, h: Int) {
+        resizeJob?.cancel()
+        val now = System.currentTimeMillis()
+        if (now - lastPushAt > 250) {
+            /* leading edge: idle → this is a discrete jump (fullscreen,
+             * maximize, drag start) — push NOW */
+            lastPushAt = now
+            if (!tornDown) player.updateSurfaceBounds(0, 0, w, h)
+        } else {
+            /* trailing edge: mid-stream — coalesce to one push at settle */
+            resizeJob = resizeScope.launch {
+                delay(100)
+                lastPushAt = System.currentTimeMillis()
+                if (!tornDown) player.updateSurfaceBounds(0, 0, w, h)
+            }
+        }
+    }
+
+    private var inLiveResize = false
+
+    fun onGeometryPass(w: Int, h: Int) {
+        resizeJob?.cancel()
+        if (!inLiveResize) {
+            inLiveResize = true
+            player.beginLiveResize()          // leading edge = drag started
+        }
+        resizeJob = resizeScope.launch {
+            delay(150)                        // trailing edge = drag settled
+            inLiveResize = false
+            if (!tornDown) {
+                player.updateSurfaceBounds(0, 0, w, h)  // contentsScale refresh
+                player.endLiveResize()
+            }
+        }
+    }
+
+    fun cancelResize() {
+        resizeJob?.cancel()
+        resizeScope.cancel()
+    }
 
     fun setBounds(value: Any?) { _bounds.value = value }
     fun setFullScreen(bool: Boolean) { _isFullScreen.value = bool }
@@ -127,7 +177,6 @@ class AuraPlayer {
         videoHandle = initializeNative(handle, canvas, audioOnly)
         println("INIT: ctx=$handle wid=$videoHandle")
         _overlayMode.value = enableUnderlayIfSupported()
-        println(overlayMode)
         _isInitialized.value = true
         if (!audioOnly && videoHandle == 0L) {
             System.err.println("[AuraPlayer] embedding failed; mpv opened detached window")
@@ -270,6 +319,14 @@ class AuraPlayer {
     external fun setUnderlay(rootHandle: Long, videoHandle: Long, index: Int,   // Windows (stub on mac/linux)
                              x: Int, y: Int, w: Int, h: Int, enable: Boolean)
     external fun setBorderlessFullscreen(windowHandle: Long, enable: Boolean)   // all platforms
+    private external fun setLiveResize(videoLayerPtr: Long, active: Boolean)
+
+    fun beginLiveResize() {
+        if (Os.current == Os.MACOS && videoHandle != 0L) setLiveResize(videoHandle, true)
+    }
+    fun endLiveResize() {
+        if (Os.current == Os.MACOS && videoHandle != 0L) setLiveResize(videoHandle, false)
+    }
 
     private enum class Os {
         WINDOWS, MACOS, LINUX;

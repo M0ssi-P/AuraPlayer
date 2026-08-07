@@ -27,5 +27,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "AuraPlayer"
 include(":auraplayer-core")
-include(":auraplayer-compose")
 include(":example")
+include(":auraplayer-compose")

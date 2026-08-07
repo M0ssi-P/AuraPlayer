@@ -80,7 +80,7 @@ typedef struct AuraCtx {
     CRITICAL_SECTION wlock;
 
     int hdr_supported;   /* monitor advertises HDR (detected at init) */
-    int hdr_active;      /* we created the FP16/scRGB pipeline
+    int hdr_active;      /* we created the FP16/scRGB pipeline */
 
     /* angle render thread */
     HANDLE        render_thread;

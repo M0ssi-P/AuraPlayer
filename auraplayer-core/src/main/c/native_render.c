@@ -281,6 +281,8 @@ JNIEXPORT jlong JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_initializeN
                 mpv_set_option(c->mpv, "wid", MPV_FORMAT_INT64, &wid);
                 mpv_set_option_string(c->mpv, "vo",      "gpu-next");
                 mpv_set_option_string(c->mpv, "gpu-api", "vulkan");
+                mpv_set_option_string(c->mpv, "target-prim", "bt.709");
+                mpv_set_option_string(c->mpv, "target-trc",  "srgb");
                 const char *gctx = aura_platform_gpu_context();
                 if (gctx)
                     mpv_set_option_string(c->mpv, "gpu-context", gctx);
@@ -345,15 +347,14 @@ JNIEXPORT void JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_initializeRe
     mpv_set_option_string(c->mpv, "d3d11-output-format", "rgb10_a2");
     #ifdef _WIN32
         mpv_set_option_string(c->mpv, "hwdec", "d3d11va-copy");  /* -> ANGLE interop */
+        if (c->hdr_active) {
+            mpv_set_option_string(c->mpv, "tone-mapping", "spline");
+            mpv_set_option_string(c->mpv, "target-trc",   "srgb");
+            mpv_set_option_string(c->mpv, "target-prim",  "bt.709");
+        }
     #else
         mpv_set_option_string(c->mpv, "hwdec", "auto-safe");
     #endif
-
-    if (c->hdr_active) {
-        mpv_set_option_string(c->mpv, "tone-mapping", "spline");
-        mpv_set_option_string(c->mpv, "target-trc",   "srgb");
-        mpv_set_option_string(c->mpv, "target-prim",  "bt.709");
-    }
 
     /* --- observes: identical to initializeNative --- */
     mpv_observe_property(c->mpv, 0, "time-pos",               MPV_FORMAT_DOUBLE);

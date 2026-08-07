@@ -75,12 +75,6 @@ mavenPublishing {
     signAllPublications()
 }
 
-compose.desktop {
-    application {
-        mainClass = "MainKt"
-    }
-}
-
 tasks.test {
     useJUnitPlatform()
 }

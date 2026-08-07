@@ -22,6 +22,45 @@
 #include <stdlib.h>
 #include "jawt_macos.h"
 
+@interface AuraMetalLayer : CAMetalLayer
+@end
+
+@implementation AuraMetalLayer
+- (void)setDrawableSize:(CGSize)s
+{
+    /* Drop transient degenerate sizes (JAWT zeroes bounds mid-update);
+     * real sizes pass through untouched — bounds stay the authority. */
+    if (s.width < 16 || s.height < 16) return;
+    [super setDrawableSize:s];
+}
+@end
+
+static dispatch_source_t g_txn_heartbeat = NULL;
+
+static void start_txn_heartbeat(void)
+{
+    if (g_txn_heartbeat) return;
+    g_txn_heartbeat = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER,
+                                             0, 0, dispatch_get_main_queue());
+    dispatch_source_set_timer(g_txn_heartbeat,
+                              DISPATCH_TIME_NOW,
+                              16 * NSEC_PER_MSEC,   /* ~60 Hz */
+                              4  * NSEC_PER_MSEC);
+    dispatch_source_set_event_handler(g_txn_heartbeat, ^{
+        [CATransaction begin];
+        [CATransaction commit];
+        [CATransaction flush];
+    });
+    dispatch_resume(g_txn_heartbeat);
+}
+
+static void stop_txn_heartbeat(void)
+{
+    if (!g_txn_heartbeat) return;
+    dispatch_source_cancel(g_txn_heartbeat);
+    g_txn_heartbeat = NULL;
+}
+
 struct AuraSurface {
     void *layer; /* CAMetalLayer, retained (ARC __bridge_retained) */
 };
@@ -64,31 +103,40 @@ AuraSurface *aura_surface_attach(JNIEnv *env, jobject canvas, int64_t *wid_out)
 
             __block void *retained = NULL;
             run_on_main(^{
-                CAMetalLayer *layer = [CAMetalLayer layer];
-                CGFloat scale = [NSScreen mainScreen].backingScaleFactor;
+                 CAMetalLayer *layer = [AuraMetalLayer layer];
+                 CGFloat scale = [NSScreen mainScreen].backingScaleFactor;
 
-                /* [FIX-DEV] a caller-supplied layer must bring its own
+                 /* [FIX-DEV] a caller-supplied layer must bring its own
                  * device + pixel format; mpv only does this for layers
-                 * it creates itself. */
-                layer.device      = MTLCreateSystemDefaultDevice();
-                layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+                             * it creates itself. */
+                            layer.device      = MTLCreateSystemDefaultDevice();
+                            layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
 
-                layer.contentsScale   = scale;
-                layer.opaque          = YES;
-                layer.framebufferOnly = YES;
-                layer.frame           = CGRectMake(0, 0, w, h);
-                layer.drawableSize    = CGSizeMake(w * scale, h * scale);
-                layer.backgroundColor = CGColorGetConstantColor(kCGColorBlack);
+                            layer.contentsScale   = scale;
+                            layer.opaque          = YES;
+                            layer.framebufferOnly = YES;
+                            layer.frame           = CGRectMake(0, 0, w, h);
+                            layer.drawableSize    = CGSizeMake(w * scale, h * scale);
+                            layer.backgroundColor = CGColorGetConstantColor(kCGColorBlack);
+                            CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+                            layer.colorspace = cs;
+                            CGColorSpaceRelease(cs);
 
-                surfaceLayers.layer = layer;
-                retained = (__bridge_retained void *)layer;
+                            fprintf(stderr, "[color] layer.colorspace=%p\n", (void *)layer.colorspace);
 
-                fprintf(stderr,
-                    "[AuraPlayer/mac] layer=%p %dx%d scale=%.1f device=%p\n",
-                    (__bridge void *)layer, (int)w, (int)h, scale,
-                    (__bridge void *)layer.device);
-                fflush(stderr);
-            });
+                            /* stretch the last frame to fill during resize gaps
+                             * instead of showing black margins */
+                            layer.contentsGravity = kCAGravityResize;
+
+                            surfaceLayers.layer = layer;
+                            retained = (__bridge_retained void *)layer;
+
+                            fprintf(stderr,
+                                "[AuraPlayer/mac] layer=%p %dx%d scale=%.1f device=%p\n",
+                                (__bridge void *)layer, (int)w, (int)h, scale,
+                                (__bridge void *)layer.device);
+                            fflush(stderr);
+                        });
             if (retained) {
                 s = (AuraSurface *)calloc(1, sizeof(AuraSurface));
                 s->layer = retained;
@@ -106,6 +154,7 @@ AuraSurface *aura_surface_attach(JNIEnv *env, jobject canvas, int64_t *wid_out)
 void aura_surface_resize(AuraSurface *s, int w, int h)
 {
     if (!s || !s->layer || w <= 0 || h <= 0) return;
+    fprintf(stderr, "[resize] called w=%d h=%d\n", w, h); fflush(stderr);
     CAMetalLayer *layer = (__bridge CAMetalLayer *)s->layer;
     dispatch_async(dispatch_get_main_queue(), ^{
         CGFloat scale = layer.superlayer
@@ -114,7 +163,6 @@ void aura_surface_resize(AuraSurface *s, int w, int h)
         [CATransaction begin];
         [CATransaction setDisableActions:YES];
         layer.contentsScale = scale;
-        layer.frame         = CGRectMake(0, 0, w, h);
         layer.drawableSize  = CGSizeMake(w * scale, h * scale);
         [CATransaction commit];
     });
@@ -165,6 +213,16 @@ JNIEXPORT void JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_enableUnderl
     CAMetalLayer *mine = (__bridge CAMetalLayer *)(void *)(intptr_t)videoLayerPtr;
     if (!mine) return;
     dispatch_async(dispatch_get_main_queue(), ^{
+        /* [FLIP] make top-left anchoring native so height changes don't
+         * require JAWT's lagging position correction (bottom-follow wobble). */
+        if (mine.superlayer) {
+            mine.superlayer.geometryFlipped = YES;
+            fprintf(stderr, "[AuraPlayer/mac] flipped superlayer=%p\n",
+                    (__bridge void *)mine.superlayer);
+        } else {
+            fprintf(stderr, "[AuraPlayer/mac] no superlayer yet - flip skipped\n");
+        }
+
         CALayer *root = mine;
         while (root.superlayer) root = root.superlayer;
         CALayer *skiko = nil;
@@ -176,6 +234,29 @@ JNIEXPORT void JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_enableUnderl
         skiko.opaque    = NO;
         skiko.zPosition = 0;
         mine.zPosition  = -1000;
+    });
+}
+
+JNIEXPORT void JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_setLiveResize(
+    JNIEnv *env, jobject obj, jlong videoLayerPtr, jboolean active)
+{
+    (void)env; (void)obj;
+    CAMetalLayer *layer = (__bridge CAMetalLayer *)(void *)(intptr_t)videoLayerPtr;
+    if (!layer) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (active) {
+            layer.presentsWithTransaction = YES;
+            start_txn_heartbeat();
+        } else {
+            layer.presentsWithTransaction = NO;
+            stop_txn_heartbeat();
+            /* release any present still waiting on a commit */
+            [CATransaction begin];
+            [CATransaction commit];
+            [CATransaction flush];
+        }
+        fprintf(stderr, "[liveResize] %s\n", active ? "ON" : "OFF");
+        fflush(stderr);
     });
 }
 
