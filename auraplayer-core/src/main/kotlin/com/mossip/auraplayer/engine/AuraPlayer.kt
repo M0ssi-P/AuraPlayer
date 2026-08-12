@@ -9,9 +9,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.awt.Canvas
+import javax.sound.midi.Track
+import kotlin.collections.emptyList
 import kotlin.time.Duration.Companion.milliseconds
 
 /* ====================================================================== */
@@ -142,6 +145,8 @@ class AuraPlayer {
     val playerState = _playerState.asStateFlow()
     private val _tracks = MutableStateFlow<List<MediaTrack>>(emptyList())
     val tracks = _tracks.asStateFlow()
+    private val _currentTrack = MutableStateFlow<List<MediaTrack>>(emptyList())
+    val currentTrack = _currentTrack.asStateFlow()
     private val _volume = MutableStateFlow(100.0)
     val volume = _volume.asStateFlow()
     private val _isMuted = MutableStateFlow(false)
@@ -152,6 +157,10 @@ class AuraPlayer {
     val fullscreen = _fullscreen.asStateFlow()
     private val _isInitialized = MutableStateFlow(false)
     val isInitialized = _isInitialized.asStateFlow()
+    private val _videoSize = MutableStateFlow<Pair<Int, Int>?>(null)
+    /** Real decoded resolution once mpv reports it (dwidth x dheight, so
+     *  rotation/anamorphic already accounted for). Null until known. */
+    val videoSize = _videoSize.asStateFlow()
 
     private var handle: Long = 0L
     val nativeCtx: Long get() = handle
@@ -207,6 +216,11 @@ class AuraPlayer {
         playerScope.cancel()
     }
 
+    suspend fun loadWhenReady(url: String) {
+        isInitialized.first { it }
+        loadFile(url)
+    }
+
     /* ---------------------------- fullscreen ------------------------------ */
 
     fun enterFullscreen() = setFullscreenInternal(true)
@@ -249,6 +263,20 @@ class AuraPlayer {
         updateSurfaceBounds(handle, x, y, w, h)
     fun setSurfaceVisible(visible: Boolean) = setSurfaceVisible(handle, visible)
 
+    private fun mpvTrackProp(type: String) = when (type) {
+        "video" -> "vid"
+        "audio" -> "aid"
+        "sub" -> "sid"
+        else -> type
+    }
+
+    fun setTrack(type: String, id: Any) {
+        setPropertyString(handle, mpvTrackProp(type),id.toString())
+    }
+
+    fun currentTrackId(type: String): String? =
+        getPropertyString(handle, mpvTrackProp(type))
+
     suspend fun getPropertyDoubleAsync(name: String): Double =
         kotlinx.coroutines.withContext(Dispatchers.Default) {
             getPropertyDouble(handle, name)
@@ -268,6 +296,9 @@ class AuraPlayer {
     fun onNativeVolumeChange(v: Double) { _volume.value = v }
     fun onNativeMuteChange(m: Boolean) { _isMuted.value = m }
     fun onNativeSpeedChange(s: Double) { _speed.value = s }
+    fun onNativeVideoSizeChange(w: Int, h: Int) {
+        if (w > 0 && h > 0) _videoSize.value = w to h
+    }
 
     fun onNativeStateChange(stateInt: Int) {
         _playerState.value = when (stateInt) {
@@ -282,9 +313,19 @@ class AuraPlayer {
         }
     }
 
+    private var tracksJob: Job? = null
+
     fun onNativeTracksChanged() {
-        playerScope.launch {
-            _tracks.value = getNativeTracks(handle)?.toList() ?: emptyList()
+        tracksJob?.cancel()
+        tracksJob = playerScope.launch {
+            val list = getNativeTracks(handle)?.toList() ?: emptyList()
+            _tracks.value = list
+
+            val currentVidTrack = list.find { it.type == "video" && it.id == currentTrackId(mpvTrackProp("video")) }
+            val currentAudioTrack = list.find { it.type == "audio" && it.id ==  currentTrackId(mpvTrackProp("audio")) }
+            val currentSubTrack = list.find { it.type == "sub" && it.id ==  currentTrackId(mpvTrackProp("sub")) }
+
+            _currentTrack.value = listOfNotNull(currentVidTrack, currentAudioTrack, currentSubTrack)
         }
     }
 

@@ -393,7 +393,10 @@ extern "C" void aura_dcomp_teardown(AuraCtx *c)
 
     // 4. Tear down core D3D hardware layer last
     if (c->d3d11_ctx)    { c->d3d11_ctx->Release();    c->d3d11_ctx = nullptr; }
-    if (c->d3d11_dev)    { c->d3d11_dev->Release();    c->d3d11_dev = nullptr; }
+    if (c->d3d11_dev) {
+       if (!c->borrowed_device) c->d3d11_dev->Release();  /* Skiko owns it in model-2 */
+       c->d3d11_dev = nullptr;
+    }
 
     LeaveCriticalSection(&c->wlock);
 

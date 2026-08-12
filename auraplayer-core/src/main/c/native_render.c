@@ -72,10 +72,15 @@ static void *event_loop(void *arg) {
     jmethodID onVolumeChanged   = (*env)->GetMethodID(env, cls, "onNativeVolumeChange",   "(D)V");
     jmethodID onMuteChanged     = (*env)->GetMethodID(env, cls, "onNativeMuteChange",     "(Z)V");
     jmethodID onSpeedChanged    = (*env)->GetMethodID(env, cls, "onNativeSpeedChange",    "(D)V");
+
+    jmethodID onVideoSizeChanged = (*env)->GetMethodID(env, cls, "onNativeVideoSizeChange", "(II)V");
     if (!onStateChanged || !onTimeChanged || !onDurationChanged || !onTracksChanged) {
         fprintf(stderr, "[AuraPlayer] Error: Could not find Kotlin callback methods!\n");
         goto detach_exit;
     }
+
+    int64_t last_dwidth = 0, last_dheight = 0;
+
     for (;;) {
         mpv_event *event = mpv_wait_event(c->mpv, -1);
         if (event->event_id == MPV_EVENT_SHUTDOWN)
@@ -86,8 +91,20 @@ static void *event_loop(void *arg) {
                 break;
             case MPV_EVENT_PROPERTY_CHANGE: {
                 mpv_event_property *prop = (mpv_event_property *)event->data;
-                if (strcmp(prop->name, "time-pos") == 0 && prop->format == MPV_FORMAT_DOUBLE) {
+                if (strcmp(prop->name, "track-list") == 0) {
+                    (*env)->CallVoidMethod(env, c->jself, onTracksChanged);
+                } else if (strcmp(prop->name, "time-pos") == 0 && prop->format == MPV_FORMAT_DOUBLE) {
                     (*env)->CallVoidMethod(env, c->jself, onTimeChanged, *(double *)prop->data);
+                } else if (strcmp(prop->name, "dwidth") == 0 && prop->format == MPV_FORMAT_INT64) {
+                    last_dwidth = *(int64_t *)prop->data;
+                    if (onVideoSizeChanged && last_dwidth > 0 && last_dheight > 0)
+                        (*env)->CallVoidMethod(env, c->jself, onVideoSizeChanged,
+                        (jint)last_dwidth, (jint)last_dheight);
+                } else if (strcmp(prop->name, "dheight") == 0 && prop->format == MPV_FORMAT_INT64) {
+                    last_dheight = *(int64_t *)prop->data;
+                    if (onVideoSizeChanged && last_dwidth > 0 && last_dheight > 0)
+                        (*env)->CallVoidMethod(env, c->jself, onVideoSizeChanged,
+                        (jint)last_dwidth, (jint)last_dheight);
                 } else if (strcmp(prop->name, "volume") == 0 && prop->format == MPV_FORMAT_DOUBLE) {
                     (*env)->CallVoidMethod(env, c->jself, onVolumeChanged, *(double *)prop->data);
                 } else if (strcmp(prop->name, "mute") == 0 && prop->format == MPV_FORMAT_FLAG) {
@@ -303,6 +320,9 @@ JNIEXPORT jlong JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_initializeN
         mpv_observe_property(c->mpv, 0, "volume",                 MPV_FORMAT_DOUBLE);
         mpv_observe_property(c->mpv, 0, "mute",                   MPV_FORMAT_FLAG);
         mpv_observe_property(c->mpv, 0, "speed",                  MPV_FORMAT_DOUBLE);
+        mpv_observe_property(c->mpv, 0, "dwidth",                 MPV_FORMAT_INT64);
+        mpv_observe_property(c->mpv, 0, "dheight",                MPV_FORMAT_INT64);
+        mpv_observe_property(c->mpv, 0, "track-list",             MPV_FORMAT_NONE);
 
         if (mpv_initialize(c->mpv) < 0) {
             fprintf(stderr, "[AuraPlayer] mpv_initialize failed\n");
@@ -346,7 +366,7 @@ JNIEXPORT void JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_initializeRe
     mpv_set_option_string(c->mpv, "target-colorspace-hint", "no");
     mpv_set_option_string(c->mpv, "d3d11-output-format", "rgb10_a2");
     #ifdef _WIN32
-        mpv_set_option_string(c->mpv, "hwdec", "d3d11va-copy");  /* -> ANGLE interop */
+        mpv_set_option_string(c->mpv, "hwdec", "no");  /* -> ANGLE interop */
         mpv_set_option_string(c->mpv, "target-prim", "bt.709");
         mpv_set_option_string(c->mpv, "target-trc",  "srgb");
         if (c->hdr_active) {
@@ -368,6 +388,9 @@ JNIEXPORT void JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_initializeRe
     mpv_observe_property(c->mpv, 0, "volume",                 MPV_FORMAT_DOUBLE);
     mpv_observe_property(c->mpv, 0, "mute",                   MPV_FORMAT_FLAG);
     mpv_observe_property(c->mpv, 0, "speed",                  MPV_FORMAT_DOUBLE);
+    mpv_observe_property(c->mpv, 0, "dwidth",                 MPV_FORMAT_INT64);
+    mpv_observe_property(c->mpv, 0, "dheight",                MPV_FORMAT_INT64);
+    mpv_observe_property(c->mpv, 0, "track-list",             MPV_FORMAT_NONE);
 
     if (mpv_initialize(c->mpv) < 0) {
         fprintf(stderr, "[AuraPlayer] mpv_initialize failed (render-api)\n");
@@ -401,7 +424,7 @@ JNIEXPORT void JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_terminateNat
                 c->thread = NULL;
             }
 
-            if (c->dcomp_dev) {
+            if (c->dcomp_dev || c->egl_ctx) {
                 aura_angle_teardown(c);
                 aura_dcomp_teardown(c);
             }
@@ -659,21 +682,24 @@ JNIEXPORT jobjectArray JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_getN
         mpv_node item = node.u.list->values[i];
         if (item.format != MPV_FORMAT_NODE_MAP) continue;
         const char *raw_id = NULL, *raw_type = NULL, *raw_title = NULL, *raw_lang = NULL;
+        int64_t id_val = -1;
         int width = 0, height = 0;
         for (int j = 0; j < item.u.list->num; j++) {
             char *key = item.u.list->keys[j];
             mpv_node val = item.u.list->values[j];
             if (val.format == MPV_FORMAT_STRING) {
-                if      (strcmp(key, "id")    == 0) raw_id    = val.u.string;
-                else if (strcmp(key, "type")  == 0) raw_type  = val.u.string;
+                if      (strcmp(key, "type")  == 0) raw_type  = val.u.string;
                 else if (strcmp(key, "title") == 0) raw_title = val.u.string;
                 else if (strcmp(key, "lang")  == 0) raw_lang  = val.u.string;
             } else if (val.format == MPV_FORMAT_INT64) {
-                if      (strcmp(key, "demux-w") == 0) width  = (int)val.u.int64;
+                if      (strcmp(key, "id")      == 0) id_val = val.u.int64;
+                else if (strcmp(key, "demux-w") == 0) width  = (int)val.u.int64;
                 else if (strcmp(key, "demux-h") == 0) height = (int)val.u.int64;
             }
         }
-        jstring jId    = (*env)->NewStringUTF(env, raw_id    ? raw_id    : "");
+        char idBuf[32];
+        snprintf(idBuf, sizeof(idBuf), "%lld", (long long)id_val);
+        jstring jId = (*env)->NewStringUTF(env, idBuf);
         jstring jType  = (*env)->NewStringUTF(env, raw_type  ? raw_type  : "");
         jstring jTitle = (*env)->NewStringUTF(env, raw_title ? raw_title : "");
         jstring jLang  = (*env)->NewStringUTF(env, raw_lang  ? raw_lang  : "");

@@ -1,75 +1,84 @@
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.Text
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.*
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.mossi.auraplayer.ui.AuraControlBar
 import com.mossi.auraplayer.ui.AuraPlayerHost
 import com.mossi.auraplayer.ui.AuraPlayerSurface
+import com.mossi.auraplayer.ui.LocalPlayerBounds
 import com.mossip.auraplayer.engine.AuraPlayer
+import com.mossip.auraplayer.engine.Model2
+import org.jetbrains.skia.SamplingMode
 
 fun main() {
     application {
-        val engine = remember { AuraPlayer() }
+//        val engine = remember { AuraPlayer() }
         val state = rememberWindowState()
-        val  hasPlayerInitialized by engine.isInitialized.collectAsState()
-        val isFullscreen by engine.fullscreen.collectAsState()
+        var playerCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+//        val  hasPlayerInitialized by engine.isInitialized.collectAsState()
+//        val isFullscreen by engine.fullscreen.collectAsState()
 
         // HLS URL to test out - https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8
         // YT URL to test out https://www.youtube.com/watch?v=866LIJWme2M&list=RD866LIJWme2M&start_radio=1
+//        http://sample.vodobox.net/skate_phantom_flex_4k/skate_phantom_flex_4k.m3u8
 
-        LaunchedEffect(hasPlayerInitialized) {
-            if(hasPlayerInitialized) {
-                engine.loadFile("https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8")
-            }
-        }
+//        LaunchedEffect(hasPlayerInitialized) {
+//            if(hasPlayerInitialized) {
+//                engine.loadFile("https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8")
+//            }
+//        }
 
         Window(
             onCloseRequest = {
-                engine.release()
                 exitApplication()
             },
             state = state,
-            onPreviewKeyEvent = { e ->    // Preview: works even when Canvas has focus
-                when {
-                    e.type == KeyEventType.KeyDown && e.key == Key.F11 -> {
-                        engine.toggleFullscreen(); true
-                    }
-                    e.type == KeyEventType.KeyDown && e.key == Key.Escape && engine.fullscreen.value -> {
-                        engine.exitFullscreen(); true
-                    }
-                    else -> false
-                }
-            }
         ) {
+            val player = remember { AuraPlayer() }
+
+            LaunchedEffect(player) {
+                player.loadWhenReady("https://pub-0400bba999e94d4da2149a2f1d2d06a6.r2.dev/hls/master.m3u8")
+            }
+
             AuraPlayerHost(window) {
-                Column(Modifier.fillMaxSize().background(Color.Black)) {
+                Column(Modifier.fillMaxSize()) {
                     // 3. Nest the surface anywhere, any depth. First composition
                     //    attaches the native surface and initializes mpv.
-                    AuraPlayerSurface(
-                        engine,
-                        modifier = if (isFullscreen) Modifier.fillMaxSize()
-                        else Modifier.aspectRatio(16f / 9f)
-                            .align(Alignment.CenterHorizontally),
-                        controls = {
-                            AuraControlBar(
-                                engine,
-                                modifier = Modifier.align(Alignment.BottomCenter),
-                            )
-                        }
-                    )
+                    CompositionLocalProvider(LocalPlayerBounds provides playerCoords) {
+                        AuraPlayerSurface(
+                            player,
+                            modifier = Modifier.onGloballyPositioned { playerCoords = it }.aspectRatio(16f / 9f)
+                                .align(Alignment.CenterHorizontally),
+                            controls = {
+                                AuraControlBar(
+                                    player,
+                                    modifier = Modifier.align(Alignment.BottomCenter),
+                                )
+                            }
+                        )
+                    }
                 }
             }
         }

@@ -17,6 +17,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -54,11 +55,11 @@ private fun MenuRow(icon: String, title: String, value: String?, onClick: () -> 
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-//        Icon(painterResource(icon), null, tint = Color.White)
+        Icon(painterResource(icon), null, tint = Color.White)
         Spacer(Modifier.width(16.dp))
         Text(title, color = Color.White, modifier = Modifier.weight(1f))
         value?.let { Text(it, color = Color.White.copy(alpha = 0.6f)) }
-        Icon(painterResource("icons/right.svg"), null, tint = Color.White.copy(alpha = 0.6f))
+        Icon(painterResource("icons/right.svg"), null, tint = Color.White)
     }
 }
 
@@ -70,7 +71,7 @@ fun SubPage(title: String, onBack: () -> Unit, content: @Composable () -> Unit) 
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-//            Icon(painterResource("icons/left.svg"), null, tint = Color.White)
+            Icon(painterResource("icons/left.svg"), null, tint = Color.White)
             Spacer(Modifier.width(16.dp))
             Text(title, color = Color.White, fontWeight = FontWeight.Medium)
         }

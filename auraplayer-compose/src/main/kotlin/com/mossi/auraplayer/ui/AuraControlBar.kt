@@ -28,6 +28,7 @@ import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import com.composables.SettingsIcon
 import com.mossi.auraplayer.ui.control.PlayPause
 import com.mossi.auraplayer.ui.control.TimeLabel
 import com.mossi.auraplayer.ui.global.PopoverAnchored
@@ -46,23 +47,21 @@ fun AuraControlBar(
         PlayPause(player); Spacer(Modifier.width(8.dp)); TimeLabel(player)
     },
     trailing: @Composable RowScope.() -> Unit = {
+        val isFullscreen = AuraPlaybackCoordinator.fullscreenPlayer === player
+        val isPiP = AuraPlaybackCoordinator.pipPlayer === player
+        val playerBounds = LocalPlayerBounds.current
+
         PopoverAnchored(
-            modifier = Modifier
-                .background(
-                    Color.Black.copy(alpha = 0.5f),
-                    shape = RoundedCornerShape(6.dp)
-                ),
-            hoverEnabled = true,
+            modifier = Modifier,
+//            boundsAnchor = { playerBounds },
             popup = { bool ->
                 SettingsSheet(player, onDismiss = { })
             }
         ) {
-            IconButton(onClick = {}) {
-                Icon(imageVector = Fullscreen(Color.White), "Settings", tint = Color.Unspecified)
-            }
+            Icon(painterResource("icons/settings.svg"), null, tint = Color.White)
         }
         Spacer(Modifier.width(8.dp))
-        IconButton(onClick = { player.toggleFullscreen() }) {
+        IconButton(onClick = { AuraPlaybackCoordinator.toggleFullscreen(player) }) {
             Icon(imageVector = Fullscreen(Color.White), "Fullscreen", tint = Color.Unspecified)
         }
     },

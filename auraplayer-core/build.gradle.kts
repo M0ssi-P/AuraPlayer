@@ -98,6 +98,7 @@ val compileNative by tasks.registering(Exec::class) {
             "${nativeSrcDir.absolutePath}/jawt_win.c",
             "${nativeSrcDir.absolutePath}/native_render.c",
             "${nativeSrcDir.absolutePath}/dcomp_win.cpp",
+            "${nativeSrcDir.absolutePath}/model2_texture.cpp",
             "${nativeSrcDir.absolutePath}/dcomp_ui.cpp",
             "${nativeSrcDir.absolutePath}/angle_win.c",
             "-I", "C:/deps/mpv-sdk/include",

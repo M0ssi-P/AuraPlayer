@@ -39,11 +39,26 @@ typedef struct AuraCtx {
     AuraSurface        *surface;
     int64_t             wid;
 
+    volatile LONG    m2_pend_w;
+    volatile LONG    m2_pend_h;
+    EGLSurface       m2_surf[3];
+    ID3D11Texture2D *m2_tex[3];
+    int              m2_w, m2_h;
+    volatile LONG    m2_front;     /* newest complete frame */
+    volatile LONG    m2_inuse;     /* what the consumer is drawing */
+    volatile LONG    m2_running;
+    HANDLE           m2_evt;
+    HANDLE           m2_thread;
+
+
 #ifdef _WIN32
     IDXGIAdapter1      *ui_adapter;
     ID3D12Device       *ui_dev;
     ID3D12CommandQueue *ui_queue;
     ID3D12Fence        *ui_fence;
+    void   *d3d11_fence;    /* ID3D11Fence*  (opaque; d3d11_4 types absent in MinGW) */
+    void   *d3d12_fence;
+    UINT64            fence_value;
     HANDLE              ui_fence_event;
     UINT64              ui_fence_value;
     UINT64              ui_buffer_fence_values[2];
@@ -54,6 +69,7 @@ typedef struct AuraCtx {
     /* ---- D3D11 (mpv's device; independent from Skiko's D3D12) -------- */
     ID3D11Device        *d3d11_dev;
     ID3D11DeviceContext *d3d11_ctx;
+    int                   borrowed_device;
     ID3D11Texture2D     *video_tex;   /* mpv renders into this            */
     IDXGISwapChain1     *video_sc;    /* composition swapchain, opaque    */
 

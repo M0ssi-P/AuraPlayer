@@ -16,6 +16,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInParent
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.layout.layout
@@ -33,6 +36,7 @@ fun PopoverAnchored(
     hoverEnabled: Boolean = false,
     gap: Int = 10,
     onChange: (e: MutableState<Boolean>) -> Unit = {},
+    boundsAnchor: (() -> LayoutCoordinates?)? = null,
     edgePadding: Dp = 12.dp,
     popup: @Composable (e: MutableState<Boolean>) -> Unit,
     content: @Composable (e: Boolean) -> Unit
@@ -67,9 +71,16 @@ fun PopoverAnchored(
             Modifier
                 .onGloballyPositioned {
                     anchorSize = it.size
-                    val b = it.boundsInRoot()
-                    anchorInRoot = IntOffset(b.left.toInt(), b.top.toInt())
-                    rootSize = it.findRootCoordinates().size
+                    val container = boundsAnchor?.invoke()
+                    if (container != null) {
+                        val pos = container.localPositionOf(it, Offset.Zero)
+                        anchorInRoot = IntOffset(pos.x.toInt(), pos.y.toInt())
+                        rootSize = container.size
+                    } else {
+                        val b = it.boundsInRoot()
+                        anchorInRoot = IntOffset(b.left.toInt(), b.top.toInt())
+                        rootSize = it.findRootCoordinates().size
+                    }
                 }
                 .clickable(
                     interactionSource = anchorInteraction,

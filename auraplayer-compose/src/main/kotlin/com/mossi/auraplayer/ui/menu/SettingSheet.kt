@@ -64,7 +64,7 @@ fun SettingsSheet(player: AuraPlayer, onDismiss: () -> Unit) {
                     SpeedOptions(player)
                 }
                 MenuPage.Quality -> SubPage("Quality", onBack = { depth = stack.size; stack.removeLast() }) {
-//                    QualityOptions(player)
+                    QualityOptions(player)
                 }
                 MenuPage.AudioDevice -> SubPage("Audio devices", onBack = { depth = stack.size; stack.removeLast() }) {
                     AudioDeviceOptions(player)
