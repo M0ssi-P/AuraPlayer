@@ -22,7 +22,7 @@ fun TimeLabel(player: AuraPlayer, modifier: Modifier = Modifier, tint: Color = C
     )
 }
 
-private fun fmt(seconds: Double): String {
+internal fun fmt(seconds: Double): String {
     if (seconds.isNaN() || seconds < 0) return "0:00"
     val total = seconds.roundToInt()
     val h = total / 3600

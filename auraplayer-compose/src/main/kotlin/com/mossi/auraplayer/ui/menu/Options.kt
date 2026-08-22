@@ -26,6 +26,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,6 +49,23 @@ fun SubtitleOptions(player: AuraPlayer) {
         subs.forEach { t ->
             OptionRow(t.title.ifBlank { t.lang ?: "Track ${t.id}" }, selected = currentSub?.id == t.id) {
                 player.setTrack("sid", t.id)
+            }
+        }
+    }
+}
+
+
+@Composable
+fun TracksOptions(player: AuraPlayer) {
+    val tracks by player.tracks.collectAsState()
+    val currentTrack by player.currentTrack.collectAsState()
+    val subs = tracks.filter { it.type == "audio" }
+    val currentSub = currentTrack.find { it.type == "audio" }
+    Column(modifier = Modifier.fillMaxWidth()) {
+        OptionRow("Off", selected = false) { player.setTrack("aid", "no") }
+        subs.forEach { t ->
+            OptionRow(t.title.ifBlank { t.lang ?: "Track ${t.id}" }, selected = currentSub?.id == t.id) {
+                player.setTrack("aid", t.id)
             }
         }
     }

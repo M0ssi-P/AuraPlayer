@@ -22,7 +22,10 @@
         typedef struct IDCompositionVisual IDCompositionVisual;
     #endif
     #include "aura_egl.h"
-#else
+#elif defined(__APPLE__)
+    #include <OpenGL/OpenGL.h>
+    #include <IOSurface/IOSurface.h>
+    #include <dispatch/dispatch.h>
     #include <pthread.h>
 #endif
 
@@ -38,18 +41,8 @@ typedef struct AuraCtx {
     jobject             jself;
     AuraSurface        *surface;
     int64_t             wid;
-
-    volatile LONG    m2_pend_w;
-    volatile LONG    m2_pend_h;
-    EGLSurface       m2_surf[3];
-    ID3D11Texture2D *m2_tex[3];
-    int              m2_w, m2_h;
-    volatile LONG    m2_front;     /* newest complete frame */
-    volatile LONG    m2_inuse;     /* what the consumer is drawing */
-    volatile LONG    m2_running;
-    HANDLE           m2_evt;
-    HANDLE           m2_thread;
-
+    int                 m2_w;
+    int                 m2_h;
 
 #ifdef _WIN32
     IDXGIAdapter1      *ui_adapter;
@@ -73,6 +66,18 @@ typedef struct AuraCtx {
     ID3D11Texture2D     *video_tex;   /* mpv renders into this            */
     IDXGISwapChain1     *video_sc;    /* composition swapchain, opaque    */
 
+
+    volatile LONG    m2_pend_w;
+    volatile LONG    m2_pend_h;
+    EGLSurface       m2_surf[3];
+    ID3D11Texture2D *m2_tex[3];
+    int              m2_w, m2_h;
+    volatile LONG    m2_front;     /* newest complete frame */
+    volatile LONG    m2_inuse;     /* what the consumer is drawing */
+    volatile LONG    m2_running;
+    HANDLE           m2_evt;
+    HANDLE           m2_thread;
+
     /* ---- ANGLE (runtime-loaded; see aura_egl.h) ----------------------- */
     AuraEgl    egl;                   /* function table + DLL handles      */
     EGLDisplay egl_dpy;
@@ -86,6 +91,7 @@ typedef struct AuraCtx {
     IDCompositionVisual *root_visual;
     IDCompositionVisual *video_visual;   /* bottom layer */
     IDCompositionVisual *ui_visual;      /* top layer    */
+    volatile LONG    m2_consumer_detached;
     HMODULE              dcomp_dll;      /* dcomp.dll, runtime-loaded     */
 
     /* ---- Skiko's swapchain — BORROWED, never resized/presented by us -- */
@@ -105,6 +111,19 @@ typedef struct AuraCtx {
     volatile LONG pending_w;      /* resize requests, coalesced by render thread */
     volatile LONG pending_h;
 #else
+    CGLContextObj        cgl_ctx;
+    IOSurfaceRef         m2_surf_io[3];
+    unsigned int         m2_tex[3];
+    unsigned int         m2_fbo[3];
+    int                  m2_front;
+    int                  m2_inuse;
+    int                  m2_running;
+    int                  m2_pend_w;
+    int                  m2_pend_h;
+    int                  m2_has_thread;
+    pthread_t            m2_thread;
+    dispatch_semaphore_t m2_sem;
+    int                  m2_consumer_detached;
     pthread_t thread;
     int       thread_started;
 #endif

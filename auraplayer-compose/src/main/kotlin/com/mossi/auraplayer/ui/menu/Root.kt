@@ -27,6 +27,7 @@ sealed interface MenuPage {
     data object Root : MenuPage
     data object Subtitles : MenuPage
     data object Speed : MenuPage
+    data object Tracks : MenuPage
     data object Quality : MenuPage
     data object AudioDevice : MenuPage
 }
@@ -37,6 +38,8 @@ fun RootPage(player: AuraPlayer, onNavigate: (MenuPage) -> Unit) {
     Column(Modifier.width(400.dp).padding(vertical = 8.dp)) {
         MenuRow("icons/caption.svg", "Subtitles/CC", "English",
             onClick = { onNavigate(MenuPage.Subtitles) })
+        MenuRow("icons/mic.svg", "Tracks", "English",
+            onClick = { onNavigate(MenuPage.Tracks) })
         MenuRow("icons/speed.svg", "Playback speed",
             if (speed == 1.0) "Normal" else "${speed}x",
             onClick = { onNavigate(MenuPage.Speed) })

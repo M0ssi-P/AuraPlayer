@@ -1,41 +1,87 @@
 # AuraPlayer
-
 **Hardware-accelerated video playback for Compose Desktop, powered by libmpv.**
 
-AuraPlayer embeds [mpv](https://mpv.io)'s `gpu-next` renderer directly inside your
-Compose for Desktop window — real Vulkan (Metal via MoltenVK on macOS) presentation,
-hardware decoding, and an API that behaves like the HTML `<video>` element: nest the
-player anywhere in your UI, and it can break out to fullscreen from any depth.
+AuraPlayer decodes with mpv's render API on a dedicated producer thread and hands
+finished frames to Compose as GPU textures — shared directly with Skia's own device
+(Metal on macOS, D3D12 on Windows) via IOSurface / D3D shared-handle interop. No frame
+copies, no second GPU upload, no native window embedding for the video itself. The
+result draws inside an ordinary Compose `Canvas`, which means it's a normal citizen of
+your UI: it participates in Compose z-order, can be composited under or behind other
+content, resizes and reflows like any composable, and can appear in more than one
+window at once (used for picture-in-picture) without a second decode.
 
 ```kotlin
-AuraPlayerHost(window) {
-    // ...anywhere, any nesting depth...
-    AuraPlayerSurface(player, Modifier.aspectRatio(16f / 9f)) {
-        MyControls(player)   // your Compose controls
+Window(
+    onCloseRequest = {
+        exitApplication()
+    },
+    state = state,
+) {
+    val player = remember { AuraPlayer() }
+
+    LaunchedEffect(player) {
+        player.loadWhenReady("https://pub-0400bba999e94d4da2149a2f1d2d06a6.r2.dev/hls/master.m3u8") //gated loadFile or use loadFile()
+    }
+
+    AuraPlayerHost(window) {
+        Column(Modifier.fillMaxSize()) {
+            // 3. Nest the surface anywhere, any depth. First composition
+            //    attaches the native surface and initializes mpv.
+            CompositionLocalProvider(LocalPlayerBounds provides playerCoords) {
+                AuraPlayerSurface(
+                    player,
+                    modifier = Modifier.onGloballyPositioned { playerCoords = it }.aspectRatio(16f / 9f)
+                        .align(Alignment.CenterHorizontally),
+                    controls = {
+                        AuraControlBar(
+                            player,
+                        )
+                    }
+                )
+            }
+        }
     }
 }
-player.loadFile("https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8")
 ```
 
 ---
 
 ## Features
 
-- **True GPU playback** — `vo=gpu-next` with Vulkan (Windows/Linux) and Vulkan-over-Metal
-  (macOS, via a custom `macembed` context patched into the bundled libmpv). No frame
-  copies, no software rendering.
-- **Hardware decoding** — D3D11/Vulkan on Windows, VideoToolbox on macOS, VA-API/VDPAU
-  on Linux (`hwdec=auto`).
-- **`<video>`-style layout** — `AuraPlayerSurface` is a normal composable. Nest it in
-  scrollables, cards, dialogs; call `player.toggleFullscreen()` from anywhere and it
-  erupts to cover the window and the screen (Chrome-style borderless fullscreen — same
-  window, no flicker, decorations and shadow restored on exit).
-- **Multiple players** — every `AuraPlayer` is an independent instance (own mpv core,
-  own surface, own event thread). Up to 16 simultaneous surfaces per window.
-- **Self-contained binaries** — statically built libmpv (ffmpeg, libass, libplacebo,
-  MoltenVK baked in) ships inside the JAR. Users install nothing.
+- **GPU texture sharing, not window embedding.** mpv renders into a triple-buffered
+  set of platform-native GPU resources on its own thread (IOSurface-backed OpenGL
+  framebuffers on macOS, D3D11 textures via ANGLE on Windows). Each consuming window
+  opens/wraps the *current* front buffer as a Skia `BackendRenderTarget` on its own
+  Metal/D3D12 device and draws it into a Compose `Canvas` — a texture hand-off, not a
+  pixel copy.
+- **Full Compose z-order participation, on every platform.** Because the video is
+  Skia-drawn pixels rather than a positioned native window, overlays, dialogs, and
+  docked controls all composite over it naturally everywhere — no platform-specific
+  "docked vs. over-video" split.
+- **Multiple simultaneous consumers of one decode.** A second window (e.g.
+  picture-in-picture) wraps the same producer's buffers on its own GPU device instead
+  of starting a second mpv instance — one decode, N on-screen views.
+- **Picture-in-picture.** A small always-on-top window can show any player's video
+  live, independent of its normal place in your layout; the original call site shows
+  an inert placeholder while PiP owns the view.
+- **Hardware decoding** — D3D11VA/DXVA on Windows, VideoToolbox on macOS
+  (`hwdec=auto`/platform default).
+- **Native-resolution, resizable buffers.** Buffers track the source's real decoded
+  resolution once mpv reports it, and re-wire live on resize or a mid-stream quality
+  change — no fixed-size scratch buffer.
 - **Reactive state** — position, duration, buffering, tracks, volume, speed, and
   player state exposed as `StateFlow`s.
+- **System integration, opt-in and granular:**
+    - Display-sleep prevention while a player is actively playing (native power
+      assertions — IOKit on macOS, `SetThreadExecutionState` on Windows).
+    - OS "Now Playing" integration — Control Center / macOS media widget and Windows
+      System Media Transport Controls, including a live seek bar, artwork, and
+      play/pause/seek remote commands. Next/previous are independently toggleable (e.g.
+      show "next episode" without "previous"), and the whole feature can be disabled
+      per player — useful for background/ambient video that shouldn't claim media keys
+      or a Control Center slot at all.
+- **Self-contained binaries** — statically built libmpv ships inside the JAR. Users
+  install nothing.
 - **Format support** — everything mpv/ffmpeg plays: HLS, DASH, MP4, MKV, live streams,
   plus `ytdl` integration.
 
@@ -44,21 +90,19 @@ player.loadFile("https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8")
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("com.mossip:auraplayer-core:<version>")     // engine (no Compose dep)
-    implementation("com.mossip:auraplayer-compose:<version>")  // Compose integration
+    implementation("io.github.m0ssi-p:auraplayer-core:<version>")     // engine (no Compose dep) - good for other frameworks
+    implementation("io.github.m0ssi-p:auraplayer-compose:<version>")  // Compose integration - this comes with core
 }
 ```
 
-Native libraries (Windows x64, macOS universal, Linux x64) are bundled in
-`auraplayer-core` and extracted at runtime. Load order (libmpv → jawt →
-native_render) is handled by `AuraPlayerLoader`.
+Native libraries (Windows x64, macOS) are bundled in `auraplayer-core` and extracted
+at runtime.
 
 ## Quick start
 
 ```kotlin
 fun main() = application {
     val player = remember { AuraPlayer() }
-
     Window(
         onCloseRequest = { player.release(); exitApplication() },
         title = "Demo",
@@ -78,10 +122,9 @@ fun main() = application {
                 AuraPlayerSurface(
                     player,
                     Modifier.aspectRatio(16f / 9f).padding(24.dp),
-                ) { PlayerControls(player) }           // controls slot
+                ) { AuraControlBar(player) }           // controls slot
             }
         }
-
         LaunchedEffect(player) {
             player.isInitialized.collect { if (it) player.loadFile(VIDEO_URL) }
         }
@@ -106,71 +149,77 @@ Rules of thumb:
 | --- | --- |
 | `loadFile(url)` | Play a URL or file path (anything mpv accepts). |
 | `setPause(Boolean)` / `seek(seconds)` / `setVolume(0..100)` / `setSpeed(x)` / `setMute(Boolean)` | Playback control. |
-| `setTrack(type, id)` / `tracks: StateFlow<List<MediaTrack>>` | Audio/sub/video track selection. |
+| `setTrack(type, id)` / `tracks: StateFlow<List<MediaTrack>>` / `currentTrack` | Audio/sub/video track selection. |
 | `audioDevices()` / `setAudioDevice(device)` | Output device enumeration & selection (runtime-switchable). |
-| `currentTime, duration, bufferDuration, playerState, volume, isMuted, speed, fullscreen, isInitialized` | `StateFlow`s for UI. |
-| `enterFullscreen()` / `exitFullscreen()` / `toggleFullscreen()` | Surface fills the window **and** the window goes borderless-fullscreen. |
-| `overlayMode: OverlayMode` | `OVER_VIDEO` (controls composited on the video) or `DOCKED` (place controls beside/below). |
-| `release()` | Tear down mpv and the native surface. |
+| `currentTime, duration, bufferDuration, playerState, volume, isMuted, speed, fullscreen, isInitialized, videoSize` | `StateFlow`s for UI. |
+| `enterFullscreen()` / `exitFullscreen()` / `toggleFullscreen()` | Coordinated through `AuraPlaybackCoordinator` — exactly one player owns the fullscreen slot at a time, across windows. |
+| `nowPlayingConfig` | `NowPlayingConfig(nowPlayingEnabled, showNext, showPrevious)` — enable/disable OS media integration and its next/previous buttons independently, live. |
+| `release()` | Tear down mpv, the producer thread, and native GPU resources. |
 
 ### Compose layer (auraplayer-compose)
 
 | Composable | Description |
 | --- | --- |
-| `AuraPlayerHost(window) { content }` | Root wrapper; owns the native surfaces, geometry sync, fullscreen arbitration, and the "active player" (F11 target with multiple videos). |
-| `AuraPlayerSurface(player, modifier) { controls }` | The video element. A lightweight placeholder — the real GPU surface is hosted at the window root and tracks this composable's bounds, so it can live at any depth and expand to fullscreen without re-creating native resources. |
+| `AuraPlayerHost(window) { content }` | Root wrapper for a window; provides `LocalAuraHost`/`LocalComposeWindow` context. |
+| `AuraPlayerSurface(player, modifier) { controls }` | The video element — a Compose `Canvas` drawing the player's current frame each recomposition. Nest it anywhere; it shows an inert placeholder while its player is promoted to fullscreen or PiP elsewhere. |
+| `AuraControlBar(player, ...)` | Default seek bar / transport controls / settings / fullscreen button; every slot (`leading`, `trailing`, `seekBar`) is overridable. |
+| `AuraPiP.open(player)` / `AuraPiP.close(player)` | Opens a floating always-on-top window showing `player`'s video, wired to the same decode as the main view. |
+| `AuraPlaybackCoordinator` | Process-wide singleton arbitrating the two exclusive presentation modes (fullscreen, PiP) so at most one player occupies each at a time, even across multiple top-level windows. |
 
 ## Platform notes
 
-| | Windows | macOS | Linux (X11) |
-| --- | --- | --- | --- |
-| Renderer | Vulkan (`winvk`) | Vulkan→Metal (MoltenVK, custom `macembed` context) | Vulkan (`x11vk`) |
-| Decode | `hwdec=auto` (D3D11VA/Vulkan) | VideoToolbox | VA-API/VDPAU |
-| Controls over video | Docked by default¹ | Composited over video (underlay mode) | Docked |
-| Fullscreen | Borderless (`SetWindowPos`, Chrome-style) | Native (`toggleFullScreen:`) | EWMH `_NET_WM_STATE_FULLSCREEN` |
+| | Windows | macOS |
+| --- | --- | --- |
+| Producer | mpv render API (OpenGL) over D3D11 textures via ANGLE, triple-buffered | mpv render API (OpenGL) over CGL + IOSurface-backed FBOs, triple-buffered |
+| Cross-device sharing | D3D11 shared NT handle → opened as `ID3D12Resource` on Skiko's device | IOSurface (natively cross-context) → wrapped as `MTLTexture` on Skiko's device |
+| Decode | `hwdec=auto` (D3D11VA) | VideoToolbox |
+| Now Playing | `SystemMediaTransportControls` (WinRT), bound to the window's `HWND` | `MPNowPlayingInfoCenter` / `MPRemoteCommandCenter` |
+| Sleep prevention | `SetThreadExecutionState(ES_DISPLAY_REQUIRED)` | `IOPMAssertionCreateWithName` |
 
-¹ The video surface is a native window and composites above Compose content on
-Windows/Linux; check `player.overlayMode` and dock your controls at the surface's
-edges there. mpv's own OSD/subtitles always render inside the video. Wayland users:
-run under XWayland (the default for JVM apps).
+Because both platforms draw the video as ordinary Skia-rendered pixels inside a
+Compose `Canvas`, there's no platform split for control placement — Compose overlays,
+dialogs, and docked layouts all composite correctly over the video everywhere.
 
-**HDR:** content plays everywhere (tone-mapped to SDR by default). Set
-`target-colorspace-hint` for HDR passthrough on Windows/Linux with an HDR display.
-
-**Audio:** output defaults to stereo downmix (predictable on odd endpoints — looking
-at you, DualSense controller speakers); use `audioDevices()` for a device picker.
+**Audio:** output defaults to stereo downmix (predictable on odd endpoints); use
+`audioDevices()` for a device picker.
 
 ## Building from source
 
-Two CI pipelines produce the shipped artifacts:
+Architecture, briefly:
 
-1. **`mpv-macbuild`** — builds universal (arm64+x86_64) static libmpv for macOS with
-   MoltenVK linked in, and injects the `macembed` Vulkan context
-   (`patches/context_mac_embed.m`) that renders into a caller-supplied `CAMetalLayer`
-   — the piece that makes embedding possible on modern JDKs, where JAWT only exposes
-   a `CALayer` attachment point.
-2. **`build-natives`** — compiles the JNI layer per platform
-   (`native_render.c` + `jawt_win_{win,x11}.c` / `jawt_macos.m`),
-   bundles libmpv, and publishes to Maven Central.
-
-Architecture, briefly: a portable C core owns per-instance mpv handles and event
-threads; thin per-platform surface files obtain a native handle from the AWT canvas
-via JAWT (HWND / CAMetalLayer / X11 Window) and hand it to mpv as `--wid`. The Compose
-layer never moves the native surface — `AuraPlayerSurface` is a measured placeholder,
-and the host repositions the root-owned surface to match, which is what makes
-fullscreen-from-any-depth safe (no AWT peer destruction, ever).
+- A portable C/Objective-C/C++ core (`Model2` JNI surface) owns per-instance mpv
+  render contexts and a dedicated producer thread per player. The producer renders
+  each new frame into whichever of three GPU buffers is neither currently published
+  nor currently being read by a consumer, then atomically publishes it — consumers
+  never observe a torn or partially-rendered frame.
+- Per platform, a thin native layer (`jawt_macos.m` on macOS, the Windows D3D11/ANGLE
+  equivalent) turns those buffers into resources a *different* GPU device (Skiko's)
+  can open: an IOSurface wrap on macOS, an opened D3D12 shared handle on Windows.
+- The Compose layer (`WindowsSkiaSurfaceStrategy` / `MacSkiaSurfaceStrategy`) wraps
+  whichever buffer is currently published as a Skia `BackendRenderTarget` on the
+  *consuming window's* own device, takes an image snapshot, and draws it in a
+  `Canvas` each frame — one registry (`WindowsVideoRegistry` / `MacVideoRegistry`) per
+  platform tracks the producer and any number of per-window consumers, so a second
+  window (PiP) just re-wraps the same live buffers rather than triggering a second
+  decode.
+- Resize is producer-driven: `requestResize` asks the producer thread to recreate its
+  three buffers at a new size on its own schedule; consumers poll `getCurrentSize` and
+  re-wire themselves whenever it changes, so multiple windows can be mid-transition
+  independently without stepping on each other.
 
 ## Known limitations
 
-- Compose content cannot be composited *over* the video on Windows/Linux
-  (`OverlayMode.DOCKED`). On-video UI there: mpv OSD/OSC, `overlay-add` bitmaps,
-  or docked layouts.
-- Moving a playing video between OS windows is not supported (one host per window).
-- Wayland requires XWayland.
-- Max 16 surfaces per window.
+- Moving a *playing* video's producer between fundamentally different GPU devices
+  (e.g. an external eGPU hot-swap) isn't handled specially — treat it as you would any
+  other GPU-device-loss scenario.
+- PiP and in-app fullscreen are each single-owner, process-wide: only one player may
+  occupy PiP, and only one may be fullscreen, at any given moment (by design — see
+  `AuraPlaybackCoordinator`).
+- OS Now Playing integration is a singleton per process on each platform: only the
+  most recently active player with `nowPlayingConfig.nowPlayingEnabled = true` owns
+  the system media widget at a time.
 
 ## License
 
-AuraPlayer is <your license>. Bundled components: mpv & ffmpeg (LGPL v2.1+ as built),
-libass, libplacebo, MoltenVK (Apache-2.0). Review LGPL obligations if you ship
-statically-modified builds.
+AuraPlayer is `will do this later`. Bundled components: mpv & ffmpeg (LGPL v2.1+ as
+built). Review LGPL obligations if you ship statically-modified builds.

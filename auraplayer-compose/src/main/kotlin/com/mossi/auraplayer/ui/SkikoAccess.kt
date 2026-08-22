@@ -36,13 +36,20 @@ internal object SkikoAccess {
     /** Pointer to SKIKO'S struct, not a COM object: [2]=ID3D12Device, [3]=queue. */
     fun devicePtr(window: ComposeWindow): Long? {
         val r = walkToRedrawer(window) ?: return null
-        if (r.javaClass.simpleName != "Direct3DRedrawer") {
-            println("AuraVideo: unsupported redrawer ${r.javaClass.name}")
-            return null
-        }
         return try {
-            r.javaClass.getDeclaredField("device").apply { isAccessible = true }.get(r) as Long
-        } catch (e: Exception) { println("AuraVideo: device field: $e"); null }
+            if (isMac) {
+                val adapter = r.javaClass.getDeclaredField("adapter")
+                    .apply { isAccessible = true }.get(r) ?: return null
+                adapter.javaClass.getDeclaredField("ptr")
+                    .apply { isAccessible = true }.get(adapter) as Long
+            } else {
+                r.javaClass.getDeclaredField("device")
+                    .apply { isAccessible = true }.get(r) as Long
+            }
+        } catch (e: Exception) {
+            println("AuraVideo: device field failed on ${r.javaClass.simpleName}: $e")
+            null
+        }
     }
 
     /** THROWS until Skiko has rendered a frame — call inside runCatching + retry. */

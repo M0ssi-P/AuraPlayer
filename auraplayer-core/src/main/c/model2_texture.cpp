@@ -84,6 +84,7 @@ Java_com_mossip_auraplayer_engine_Model2_initRender(
     c->m2_evt = nullptr;
     c->m2_w = 0; c->m2_h = 0;
     for (int i = 0; i < 3; i++) { c->m2_surf[i] = EGL_NO_SURFACE; c->m2_tex[i] = nullptr; }
+    InterlockedExchange(&c->m2_consumer_detached, 0);
     InterlockedExchange(&c->m2_running, 0);
     InterlockedExchange(&c->m2_front, 0);
     InterlockedExchange(&c->m2_inuse, 0);
@@ -106,7 +107,7 @@ Java_com_mossip_auraplayer_engine_Model2_createRenderContext(
 
 /* ---- 3. Open a shared handle on Skiko's D3D12 device ------------------- */
 extern "C" JNIEXPORT jlong JNICALL
-Java_com_mossip_auraplayer_engine_Model2_openOnD3D12(
+Java_com_mossip_auraplayer_engine_Model2_wrapNative(
     JNIEnv *, jclass, jlong d3d12DevicePtr, jlong sharedHandle)
 {
     if (!d3d12DevicePtr || !sharedHandle) return 0;
@@ -123,7 +124,7 @@ Java_com_mossip_auraplayer_engine_Model2_openOnD3D12(
  * extractDirect3DDevicePtr returns a pointer to SKIKO'S OWN STRUCT, not a
  * COM object: [2] = ID3D12Device*, [3] = ID3D12CommandQueue*. */
 extern "C" JNIEXPORT jlong JNICALL
-Java_com_mossip_auraplayer_engine_Model2_skiaD3D12Device(JNIEnv*, jclass, jlong p)
+Java_com_mossip_auraplayer_engine_Model2_skiaDevicePtr(JNIEnv*, jclass, jlong p)
 {
     if (!p) return 0;
     return (jlong)((uintptr_t *)(intptr_t)p)[2];
@@ -222,11 +223,13 @@ static unsigned __stdcall m2_producer(void *arg)
 
         LONG pw = InterlockedCompareExchange(&c->m2_pend_w, 0, 0);
         LONG ph = InterlockedCompareExchange(&c->m2_pend_h, 0, 0);
-        if (pw > 0 && ph > 0 && (pw != c->m2_w || ph != c->m2_h)) {
+        if (pw > 0 && ph > 0 && (pw != c->m2_w || ph != c->m2_h) &&
+            InterlockedCompareExchange(&c->m2_consumer_detached, 0, 0)) {
             e->MakeCurrent(c->egl_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
             for (int i = 0; i < 3; i++) m2_free_target(c, i);
             for (int i = 0; i < 3; i++) m2_make_target(c, i, pw, ph);
             c->m2_w = pw; c->m2_h = ph;
+            InterlockedExchange(&c->m2_consumer_detached, 0);
             M2_LOG("producer resized to %dx%d", (int)pw, (int)ph);
         }
 
@@ -424,6 +427,26 @@ Java_com_mossip_auraplayer_engine_Model2_getCurrentSizeNative(
     jint vals[2] = { 0, 0 };
     if (c) { vals[0] = c->m2_w; vals[1] = c->m2_h; }
     env->SetIntArrayRegion(out, 0, 2, vals);
+}
+
+
+JNIEXPORT void JNICALL
+Java_com_mossip_auraplayer_engine_Model2_notifyDetached(
+    JNIEnv *env, jclass cls, jlong ctxPtr)
+{
+    AuraCtx *c = (AuraCtx *)(intptr_t)ctxPtr;
+    if (!c) return;
+    InterlockedExchange(&c->m2_consumer_detached, 1);
+    if (c->m2_evt) SetEvent(c->m2_evt);      /* wake the producer now */
+}
+
+JNIEXPORT void JNICALL
+Java_com_mossip_auraplayer_engine_Model2_releaseNative(
+    JNIEnv *env, jclass cls, jlong resPtr)
+{
+    if (!resPtr) return;
+    ID3D12Resource *r = (ID3D12Resource *)(intptr_t)resPtr;
+    r->lpVtbl->Release(r);      /* the +1 from OpenSharedHandle in wrapNative */
 }
 
 #endif

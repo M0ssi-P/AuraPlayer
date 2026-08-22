@@ -37,4 +37,5 @@ internal val isMac: Boolean =
     System.getProperty("os.name").lowercase().startsWith("mac")
 
 internal fun platformStrategy(): VideoSurfaceStrategy =
-    if (isWindows) WindowsSkiaSurfaceStrategy else MacCanvasSurfaceStrategy
+    if (isWindows) WindowsSkiaSurfaceStrategy
+    else MacSkiaSurfaceStrategy

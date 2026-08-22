@@ -40,10 +40,10 @@ val LocalPlayerBounds = compositionLocalOf<LayoutCoordinates?> { null }
 @Composable
 fun AuraPlayerHost(
     window: ComposeWindow,
+    isPip: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val host = remember(window) { AuraHostState(window) }
-    val fsPlayer = AuraPlaybackCoordinator.fullscreenPlayer
 
     CompositionLocalProvider(
         LocalAuraHost provides host,
@@ -51,7 +51,11 @@ fun AuraPlayerHost(
     ) {
         Box(Modifier.fillMaxSize()) {
             content()
-
+            val fsPlayer = if (isPip) {
+                AuraPlaybackCoordinator.pipPlayer
+            } else {
+                AuraPlaybackCoordinator.fullscreenPlayer
+            }
             // Fullscreen overlay: last in the tree = top z-order. A player
             // rendered inline (via AuraPlayerSurface) hides itself while it
             // is the fullscreen owner — see AuraPlayerSurface below — so

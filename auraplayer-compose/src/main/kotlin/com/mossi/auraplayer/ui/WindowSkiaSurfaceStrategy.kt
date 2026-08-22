@@ -15,6 +15,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.awt.ComposeWindow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import com.mossip.auraplayer.engine.AuraPlayer
@@ -105,7 +106,7 @@ internal object WindowsSkiaSurfaceStrategy : VideoSurfaceStrategy {
         // briefly stalls.
         val lastGood = remember { LastGoodFrame() }
 
-        Box(modifier.background(androidx.compose.ui.graphics.Color.Black)) {
+        Box(modifier.background(Color.Black)) {
             Canvas(Modifier.fillMaxSize()) {
                 tick // recomposition tick
 

@@ -7,9 +7,12 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.awt.Canvas
@@ -33,6 +36,12 @@ data class MediaTrack(
 )
 
 data class AudioDevice(val id: String, val description: String)
+
+data class NowPlayingConfig(
+    val nowPlayingEnabled: Boolean = true,
+    val showNext: Boolean = true,
+    val showPrevious: Boolean = true,
+)
 
 enum class OverlayMode { OVER_VIDEO, DOCKED }
 
@@ -161,8 +170,14 @@ class AuraPlayer {
     /** Real decoded resolution once mpv reports it (dwidth x dheight, so
      *  rotation/anamorphic already accounted for). Null until known. */
     val videoSize = _videoSize.asStateFlow()
+    val aspect: StateFlow<Float> = combine(_videoSize) { s ->
+        val w = s.first()?.first ?: 0
+        val h = s.first()?.second ?: 0
+        if (w > 0 && h > 0) w.toFloat() / h else 0f
+    }.stateIn(playerScope, SharingStarted.Eagerly, 0f)
 
     private var handle: Long = 0L
+    private var nowPlayingSetupDone = false
     val nativeCtx: Long get() = handle
 
     var videoHandle: Long = 0L
@@ -212,6 +227,9 @@ class AuraPlayer {
             handle = 0L
             videoHandle = 0L
             _isInitialized.value = false
+            if (nowPlayingConfig.nowPlayingEnabled && nowPlayingSetupDone) {
+                teardownNowPlayingNative()
+            }
         }
         playerScope.cancel()
     }
@@ -300,16 +318,59 @@ class AuraPlayer {
         if (w > 0 && h > 0) _videoSize.value = w to h
     }
 
+    // NOW_PLAYING NATIVE CALLs
+
+    fun onRemotePlay() { setPause(false) }
+    fun onRemotePause() { setPause(true) }
+    fun onRemoteSeek(positionSeconds: Double) { seek(positionSeconds) }
+    fun onRemoteNext() { /* if you have a playlist concept */ }
+    fun onRemotePrevious() { /* same */ }
+
     fun onNativeStateChange(stateInt: Int) {
         _playerState.value = when (stateInt) {
-            0 -> PlayerState.PLAYING
-            1 -> PlayerState.PAUSED
-            2 -> PlayerState.STOPPED
-            3 -> PlayerState.IDLE
+            0 -> {
+                setSleepPreventionNative(true)
+                if (nowPlayingConfig.nowPlayingEnabled) {
+                    if (!nowPlayingSetupDone) {
+                        setupNowPlayingNative(handle)
+                        nowPlayingSetupDone = true
+                    }
+                    setNextEnabledNative(nowPlayingConfig.showNext)
+                    setPreviousEnabledNative(nowPlayingConfig.showPrevious)
+                    updateNowPlayingNative("Jujutsu Kaisen", duration.value, currentTime.value, true)
+                }
+                PlayerState.PLAYING
+            }
+            1 -> {
+                setSleepPreventionNative(false)
+                if (nowPlayingConfig.nowPlayingEnabled && nowPlayingSetupDone) {
+                    setNextEnabledNative(nowPlayingConfig.showNext)
+                    setPreviousEnabledNative(nowPlayingConfig.showPrevious)
+                    updateNowPlayingNative("Jujutsu Kaisen", duration.value, currentTime.value, false)
+                }
+                PlayerState.PAUSED
+            }
+            2 -> {
+                setSleepPreventionNative(false)
+                if (nowPlayingConfig.nowPlayingEnabled && nowPlayingSetupDone) {
+                    teardownNowPlayingNative()
+                }
+                PlayerState.STOPPED
+            }
+            3 -> {
+                setSleepPreventionNative(false)
+                PlayerState.IDLE
+            }
             4 -> PlayerState.LOADING
             5 -> PlayerState.SEEKING
             6 -> PlayerState.BUFFERING
-            else -> PlayerState.IDLE
+            else -> {
+                setSleepPreventionNative(false)
+                if (nowPlayingConfig.nowPlayingEnabled && nowPlayingSetupDone) {
+                    teardownNowPlayingNative()
+                }
+                PlayerState.IDLE
+            }
         }
     }
 
@@ -351,8 +412,31 @@ class AuraPlayer {
     private external fun getAudioDevices(handle: Long): Array<String>?
     private external fun setAudioDevice(handle: Long, deviceId: String)
     private external fun getTrackCount(handle: Long, type: String): Int
+    external fun setNextEnabledNative(enabled: Boolean)
+    external fun setPreviousEnabledNative(enabled: Boolean)
     private external fun setTrack(handle: Long, type: String, id: String)
     private external fun getNativeTracks(handle: Long): Array<MediaTrack>?
+
+    // Now PLAYING & Prevent sleep
+    external fun setSleepPreventionNative(enable: Boolean)
+    external fun setupNowPlayingNative(hwnd: Long)
+    external fun updateNowPlayingNative(title: String, duration: Double, position: Double, isPlaying: Boolean)
+    external fun teardownNowPlayingNative()
+
+    var nowPlayingConfig: NowPlayingConfig = NowPlayingConfig()
+        set(value) {
+            val prevEnabled = field.nowPlayingEnabled
+            field = value
+            if (value.nowPlayingEnabled && !prevEnabled) {
+                setupNowPlayingNative(handle)
+            } else if (!value.nowPlayingEnabled && prevEnabled) {
+                teardownNowPlayingNative()
+            }
+            if (value.nowPlayingEnabled) {
+                setNextEnabledNative(value.showNext)
+                setPreviousEnabledNative(value.showPrevious)
+            }
+        }
     private external fun updateSurfaceBounds(handle: Long, x: Int, y: Int, w: Int, h: Int)
     private external fun setSurfaceVisible(handle: Long, visible: Boolean)
 

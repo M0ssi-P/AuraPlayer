@@ -46,7 +46,11 @@ fun AuraPlayerSurface(
         // The live view now lives elsewhere (host overlay / PiP window).
         // Reserve the layout space with an inert placeholder so surrounding
         // UI doesn't jump, but don't stand up a second producer/consumer.
-        Box(modifier.background(Color.Black))
+        Box(modifier.background(Color.Black)){
+            if (isPiPHere){
+                controls()
+            }
+        }
         return
     }
 

@@ -15,7 +15,9 @@
  */
 
 #include <windows.h>
-
+#include <jni.h>
+#include <windowsx.h>
+#include <dwmapi.h>
 #include <jawt.h>
 #include <jawt_md.h>
 #include <stdio.h>
@@ -25,6 +27,16 @@
 struct AuraSurface {
     HWND hwnd;   /* the AWT Canvas child window */
 };
+
+typedef struct {
+    WNDPROC orig;
+    float   aspect;     /* w/h, 0 = unlocked */
+    int     minW;
+    LONG    noDrag;     /* set by Compose when the pointer is over a control */
+} PipState;
+
+static const wchar_t *kPipProp = L"AuraPipState";
+#define PIP_BORDER 6
 
 /* ------------------------- JAWT attach ------------------------- */
 
@@ -133,6 +145,131 @@ static void apply_region(void)
         DeleteObject(hole);
     }
     SetWindowRgn(g_skiko, rgn, TRUE); /* system takes ownership of rgn */
+}
+
+static LRESULT CALLBACK PipProc(HWND h, UINT m, WPARAM w, LPARAM l)
+{
+    PipState *s = (PipState *)GetPropW(h, kPipProp);
+    if (!s) return DefWindowProcW(h, m, w, l);
+
+    switch (m) {
+    case WM_NCCALCSIZE:
+        if (w) {
+            /* Client fills the whole window: titlebar gone, frame kept.
+             * When maximised the frame hangs off-screen, so inset it. */
+            NCCALCSIZE_PARAMS *p = (NCCALCSIZE_PARAMS *)l;
+            if (IsZoomed(h)) {
+                int cx = GetSystemMetrics(SM_CXSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+                int cy = GetSystemMetrics(SM_CYSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+                p->rgrc[0].left += cx; p->rgrc[0].right  -= cx;
+                p->rgrc[0].top  += cy; p->rgrc[0].bottom -= cy;
+            }
+            return 0;
+        }
+        break;
+
+    case WM_NCHITTEST: {
+        /* Resize borders ourselves, since the frame is now invisible. */
+        RECT r; GetWindowRect(h, &r);
+        int x = GET_X_LPARAM(l), y = GET_Y_LPARAM(l);
+        int b = PIP_BORDER;
+        int left = x < r.left + b, right = x >= r.right - b;
+        int top  = y < r.top  + b, bot   = y >= r.bottom - b;
+        if (top && left)  return HTTOPLEFT;
+        if (top && right) return HTTOPRIGHT;
+        if (bot && left)  return HTBOTTOMLEFT;
+        if (bot && right) return HTBOTTOMRIGHT;
+        if (left)  return HTLEFT;
+        if (right) return HTRIGHT;
+        if (top)   return HTTOP;
+        if (bot)   return HTBOTTOM;
+        /* Everything else drags the window — and because it's a real
+         * HTCAPTION, you get Aero Snap and double-click-maximise free. */
+        if (!InterlockedCompareExchange(&s->noDrag, 0, 0)) return HTCAPTION;
+        return HTCLIENT;
+    }
+
+    case WM_SIZING:
+        if (s->aspect > 0.0f) {
+            RECT *r = (RECT *)l;
+            RECT wr, cr; GetWindowRect(h, &wr); GetClientRect(h, &cr);
+            int padW = (wr.right - wr.left) - cr.right;      /* 0 after NCCALCSIZE */
+            int padH = (wr.bottom - wr.top) - cr.bottom;
+            int cw = (r->right - r->left) - padW;
+            int ch = (int)(cw / s->aspect);
+            switch (w) {
+            case WMSZ_LEFT: case WMSZ_RIGHT:
+            case WMSZ_BOTTOMLEFT: case WMSZ_BOTTOMRIGHT:
+                r->bottom = r->top + ch + padH; break;
+            case WMSZ_TOPLEFT: case WMSZ_TOPRIGHT:
+                r->top = r->bottom - ch - padH; break;
+            case WMSZ_TOP: case WMSZ_BOTTOM: {
+                int chh = (r->bottom - r->top) - padH;
+                int cww = (int)(chh * s->aspect);
+                if (w == WMSZ_TOP || w == WMSZ_BOTTOM)
+                    r->right = r->left + cww + padW;
+                break;
+            }
+            }
+            return TRUE;
+        }
+        break;
+
+    case WM_GETMINMAXINFO: {
+        MINMAXINFO *mm = (MINMAXINFO *)l;
+        mm->ptMinTrackSize.x = s->minW;
+        mm->ptMinTrackSize.y = s->aspect > 0 ? (LONG)(s->minW / s->aspect) : 90;
+        break;
+    }
+    }
+    return CallWindowProcW(s->orig, h, m, w, l);
+}
+
+JNIEXPORT void JNICALL
+Java_com_mossip_auraplayer_engine_Model2_decorate(
+    JNIEnv *env, jclass cls, jlong hwndPtr, jfloat aspect, jint minW)
+{
+    (void)env; (void)cls;
+    HWND h = (HWND)(intptr_t)hwndPtr;
+    if (!h || GetPropW(h, kPipProp)) return;
+
+    PipState *s = (PipState *)calloc(1, sizeof(PipState));
+    s->aspect = aspect; s->minW = minW; s->noDrag = 0;
+    SetPropW(h, kPipProp, (HANDLE)s);
+    s->orig = (WNDPROC)SetWindowLongPtrW(h, GWLP_WNDPROC, (LONG_PTR)PipProc);
+
+    /* 1px of frame extended into the client keeps the DWM drop shadow */
+    MARGINS mg = { 0, 0, 1, 0 };
+    DwmExtendFrameIntoClientArea(h, &mg);
+
+    /* rounded corners on Win11 (ignored on Win10) */
+    DWORD pref = 2 /* DWMWCP_ROUND */;
+    DwmSetWindowAttribute(h, 33 /* DWMWA_WINDOW_CORNER_PREFERENCE */,
+                          &pref, sizeof(pref));
+
+    /* force the frame to recalculate now */
+    SetWindowPos(h, NULL, 0, 0, 0, 0,
+                 SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE |
+                 SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+JNIEXPORT void JNICALL
+Java_com_mossip_auraplayer_engine_Model2_setAspect(
+    JNIEnv *env, jclass cls, jlong hwndPtr, jfloat aspect)
+{
+    (void)env; (void)cls;
+    PipState *s = (PipState *)GetPropW((HWND)(intptr_t)hwndPtr, kPipProp);
+    if (s) s->aspect = aspect;
+}
+
+/** Compose calls this on hover so controls don't drag the window. */
+JNIEXPORT void JNICALL
+Java_com_mossip_auraplayer_engine_Model2_setNoDrag(
+    JNIEnv *env, jclass cls, jlong hwndPtr, jboolean noDrag)
+{
+    (void)env; (void)cls;
+    PipState *s = (PipState *)GetPropW((HWND)(intptr_t)hwndPtr, kPipProp);
+    if (s) InterlockedExchange(&s->noDrag, noDrag ? 1 : 0);
 }
 
 /*

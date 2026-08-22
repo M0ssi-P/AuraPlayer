@@ -60,7 +60,6 @@ internal class ConsumerResources(
     val rt = arrayOfNulls<BackendRenderTarget>(3)
     val surface = arrayOfNulls<Surface>(3)
     val d3d12Res = LongArray(3)
-    var staging: Surface? = null
     @Volatile var wiredW = 0
     @Volatile var wiredH = 0
 
@@ -68,10 +67,11 @@ internal class ConsumerResources(
     fun closeOnDrawThread() {
         for (i in 0..2) {
             surface[i]?.close(); surface[i] = null
-            rt[i]?.close(); rt[i] = null
-            d3d12Res[i] = 0L
+            rt[i]?.close();      rt[i] = null
+            if (d3d12Res[i] != 0L) { Model2.releaseNative(d3d12Res[i]); d3d12Res[i] = 0L }
         }
         wiredW = 0; wiredH = 0
+        Model2.notifyDetached(player.nativeCtx)
     }
 }
 
@@ -143,7 +143,7 @@ internal object WindowsVideoRegistry {
         // only once everything is ready means there's never a frame where
         // consumer.surface[i] is null/stale, which is what caused the
         // visible flash/flicker on a quality switch or any other resize.
-        val dev = Model2.skiaD3D12Device(c.skikoDevice)
+        val dev = Model2.skiaDevicePtr(c.skikoDevice)
         val newRt = arrayOfNulls<BackendRenderTarget>(3)
         val newSurface = arrayOfNulls<Surface>(3)
         val newRes = LongArray(3)
@@ -153,7 +153,7 @@ internal object WindowsVideoRegistry {
                 ?: Model2.mintSharedHandle(p.player.nativeCtx, i)
             check(handle != 0L) { "AuraPlayer: mintSharedHandle failed for buffer $i" }
 
-            val r12 = Model2.openOnD3D12(dev, handle)
+            val r12 = Model2.wrapNative(dev, handle)
             check(r12 != 0L) { "AuraPlayer: openOnD3D12 failed for buffer $i" }
             newRes[i] = r12
 
@@ -167,12 +167,17 @@ internal object WindowsVideoRegistry {
 
         // Swap: keep references to the old set so we can close it after.
         val oldRt = arrayOfNulls<BackendRenderTarget>(3).also { it.indices.forEach { i -> it[i] = c.rt[i] } }
+        val oldRes = c.d3d12Res.copyOf()
         val oldSurface = arrayOfNulls<Surface>(3).also { it.indices.forEach { i -> it[i] = c.surface[i] } }
         for (i in 0..2) { c.rt[i] = newRt[i]; c.surface[i] = newSurface[i]; c.d3d12Res[i] = newRes[i] }
         c.wiredW = targetW; c.wiredH = targetH
 
         // Now safe to close the old set — nothing references it anymore.
-        for (i in 0..2) { oldSurface[i]?.close(); oldRt[i]?.close() }
+        for (i in 0..2) {
+            oldSurface[i]?.close()
+            oldRt[i]?.close()
+            if (oldRes[i] != 0L) Model2.releaseNative(oldRes[i])
+        }
     }
 
     /** Call when a window stops displaying a player (Compose dispose). */

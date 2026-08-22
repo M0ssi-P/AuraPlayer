@@ -101,6 +101,7 @@ val compileNative by tasks.registering(Exec::class) {
             "${nativeSrcDir.absolutePath}/model2_texture.cpp",
             "${nativeSrcDir.absolutePath}/dcomp_ui.cpp",
             "${nativeSrcDir.absolutePath}/angle_win.c",
+            "${nativeSrcDir.absolutePath}/aura_power_windows.m",
             "-I", "C:/deps/mpv-sdk/include",
             "-I", "$jdkHome/include",
             "-I", "$jdkHome/include/win32",
@@ -115,6 +116,7 @@ val compileNative by tasks.registering(Exec::class) {
             "-o", outputFile.absolutePath,
             "${nativeSrcDir.absolutePath}/native_render.c",
             "${nativeSrcDir.absolutePath}/jawt_macos.m",
+            "${nativeSrcDir.absolutePath}/aura_power_macos.m",
             "-I", "/Users/user1/Downloads/libmpv-macos/include",
             "-I", "$jdkHome/include",
             "-I", "$jdkHome/include/darwin",
@@ -129,6 +131,9 @@ val compileNative by tasks.registering(Exec::class) {
             "-framework", "CoreGraphics",
             "-framework", "CoreVideo",
             "-framework", "Metal",
+            "-framework", "IOSurface",
+            "-framework", "MediaPlayer",
+            "-framework", "IOKit",
         )
 
         else -> listOf(

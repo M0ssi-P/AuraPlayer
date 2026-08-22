@@ -4,8 +4,9 @@ object Model2 {
     init { AuraPlayerLoader.load() }
     external fun initRender(ctxPtr: Long): Boolean
     external fun createRenderContext(ctxPtr: Long): Boolean
-    external fun openOnD3D12(d3d12DevicePtr: Long, sharedHandle: Long): Long
-    external fun skiaD3D12Device(ptr: Long): Long
+    external fun wrapNative(d3d12DevicePtr: Long, sharedHandle: Long): Long
+    external fun wrapNative(d3d12DevicePtr: Long, sharedHandle: Long, w: Int, h: Int): Long
+    external fun skiaDevicePtr(ptr: Long): Long
     external fun skiaD3D12Queue(ptr: Long): Long
     external fun startProducer(ctxPtr: Long, w: Int, h: Int): LongArray?
     external fun stopProducer(ctxPtr: Long)
@@ -31,4 +32,10 @@ object Model2 {
         getCurrentSizeNative(ctxPtr, out)
         return out[0] to out[1]
     }
+
+    external fun decorate(windowHandle: Long, aspect: Float, minW: Int)
+    external fun setAspect(windowHandle: Long, aspect: Float)
+    external fun setNoDrag(windowHandle: Long, noDrag: Boolean)
+    external fun releaseNative(texPtr: Long)
+    external fun notifyDetached(ctxPtr: Long)
 }
