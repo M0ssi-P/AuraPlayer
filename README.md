@@ -176,4 +176,4 @@ extracted at first launch. mpv does not need to be installed separately.
 
 ## License
 
-<!-- TODO -->
+<!-- TODO ->
