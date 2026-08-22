@@ -2,9 +2,9 @@
 
 **AuraPlayer** is a high-performance **cross-platform desktop media playback engine written in Kotlin**.
 
-It bridges the JVM with native GPU compositors => **DirectComposition** on Windows and
-**CoreAnimation** on macOS so video frames are composited directly alongside your desktop UI and
-never round-trip through the JVM.
+mpv decodes and renders on the GPU; the finished frame is handed to Skia as a texture and drawn as a
+**real Compose element**. No native child window, no compositor overlay, no frame ever touching the
+JVM heap.
 
 AuraPlayer supports **both audio and video playback** and is designed to be embedded into JVM desktop
 applications while maintaining hardware-accelerated performance.
@@ -28,14 +28,25 @@ frameworks.
 Most JVM video solutions paint frames into an AWT component, which forces a choice: either the video
 is on top and nothing can overlay it, or you pay to copy every frame back through the JVM.
 
-AuraPlayer does neither. It inserts a **native compositor layer** behind your UI. Video and UI are
-two independent GPU surfaces, blended by the OS compositor — so controls, subtitles and popups draw
-above the video with correct alpha, at full frame rate, with no flicker and no
-heavyweight/lightweight mixing problems.
+AuraPlayer does neither. mpv renders into a GPU texture that is **shared with Skia's own device** —
+the same device Compose already draws with. Compose then draws that texture like any other image.
+
+The consequence is that video stops being a special case:
+
+- **Z-order is just declaration order.** Anything can be drawn above or below the video — controls,
+  dialogs, blur, rounded corners, scrims. No alpha-blending tricks, no layer arbitration.
+- **Clipping, transforms and scrolling work.** The video is inside Compose's layout, so
+  `clip`, `graphicsLayer`, scrollables and `AnimatedVisibility` all behave normally.
+- **Any nesting depth, any number of players.** No per-window surface budget, no "primary player"
+  that gets the fast path while others degrade.
+- **Multiple windows share one decode.** A picture-in-picture window wraps the *same* buffers the
+  main window is reading — one mpv instance, one decode, two views.
+
+Also:
 
 - Hardware-accelerated decoding
-- Zero-copy GPU rendering pipeline
-- Native compositor integration on Windows and macOS
+- Zero-copy GPU pipeline (no CPU readback, no `glReadPixels`, no bitmap round-trip)
+- Playback continues during window drag and resize
 - Audio-only playback supported
 - Most common containers and codecs *(depending on native backend support)*
 
@@ -45,8 +56,8 @@ heavyweight/lightweight mixing problems.
 
 | Module | Purpose |
 |---|---|
-| **`auraplayer-core`** | The playback engine — media pipeline, JNI bridge, native rendering, decoding. No UI framework dependency. Use it with Swing, JavaFX, LWJGL, or your own renderer. |
-| **`auraplayer-compose`** | Compose Desktop integration — video surface composable, player controls, overlay support. Includes core. |
+| **`auraplayer-core`** | The playback engine — media pipeline, JNI bridge, native rendering, decoding. No UI framework dependency. |
+| **`auraplayer-compose`** | Compose Desktop integration — video surface composable, player controls, fullscreen and picture-in-picture. Includes core. |
 
 **Getting started, installation and usage live in the module docs:**
 → [`auraplayer-compose/README.md`](auraplayer-compose/README.md)
@@ -55,98 +66,100 @@ heavyweight/lightweight mixing problems.
 
 ## Architecture
 
-AuraPlayer composites video and UI as **two separate native layers**. The video layer is owned by the
-engine; the UI layer receives your Compose content rendered by Skia. The compositor blends them —
-neither layer knows the other exists.
+The pipeline is the same shape on both platforms; only the sharing primitive differs.
 
 ```mermaid
 flowchart TD
     App["Your Compose App"]
-
     Host["AuraPlayerHost (per window)"]
     Surface["AuraPlayerSurface (per player)"]
 
     App --> Host
     Host --> Surface
-
-    Surface --> Geom["Geometry pass<br/>boundsInRoot to native rect"]
     Surface --> Engine["AuraPlayer engine"]
 
-    Engine --> JNI["JNI Bridge"]
-    JNI --> Backend{"Platform backend"}
+    Engine --> Producer["Producer thread<br/>mpv render API"]
+    Producer --> Buffers["Triple-buffered GPU targets"]
 
-    Backend -->|Windows| DComp["DirectComposition"]
-    Backend -->|macOS| CA["CoreAnimation"]
-    Backend -->|fallback| Region["Region clipping (AWT/JAWT)"]
+    Buffers --> Backend{"Platform backend"}
 
-    DComp --> VideoSC["Video swapchain<br/>D3D11 · opaque"]
-    DComp --> UiSC["UI swapchain<br/>D3D12 · premultiplied alpha"]
+    Backend -->|Windows| Win["ANGLE: mpv GL to D3D11 texture<br/>shared NT handle"]
+    Backend -->|macOS| Mac["CGL: mpv GL to rectangle texture<br/>on an IOSurface"]
 
-    VideoSC --> ANGLE["ANGLE: mpv GL to D3D11 texture"]
-    UiSC --> Skia["Skia/Skiko renders Compose"]
+    Win --> WinImport["ID3D12Resource on Skiko's D3D12 device"]
+    Mac --> MacImport["MTLTexture on Skiko's MTLDevice"]
 
-    CA --> Metal["CAMetalLayer underlay"]
-    CA --> ComposeLayer["Compose layer above"]
+    WinImport --> Skia["Skia Surface<br/>(BackendRenderTarget)"]
+    MacImport --> Skia
+
+    Skia --> Draw["Compose Canvas draws it<br/>like any other image"]
 ```
 
-### Windows — DirectComposition
+### The shared-texture bridge
 
-The primary path. At init AuraPlayer creates a D3D11 device, a DirectComposition device, and a
-visual tree targeting the window:
+Skiko already owns a GPU device to render Compose with — D3D12 on Windows, Metal on macOS.
+AuraPlayer reaches that device, imports mpv's output texture into it, and wraps the result as a Skia
+`Surface`. From that point Compose is drawing a texture it considers its own.
+
+**Windows.** mpv renders OpenGL through **ANGLE** into an EGL pbuffer backed by a D3D11 texture,
+created with `D3D11_RESOURCE_MISC_SHARED_NTHANDLE`. The handle is opened on Skiko's D3D12 device
+via `OpenSharedHandle`, wrapped with `BackendRenderTarget.makeDirect3D`, and turned into a
+`Surface`.
+
+**macOS.** mpv renders through **CGL** (desktop OpenGL 4.1) into a `GL_TEXTURE_RECTANGLE` bound to an
+**IOSurface** via `CGLTexImageIOSurface2D`. The same IOSurface is imported on Skiko's `MTLDevice`
+with `newTextureWithDescriptor:iosurface:plane:`, wrapped with `BackendRenderTarget.makeMetal`, and
+turned into a `Surface`.
+
+IOSurface is the macOS analogue of Windows' shared NT handle: a GPU allocation two devices can both
+address without a copy.
+
+### The producer thread
+
+mpv does **not** render on Compose's draw pass. A dedicated producer thread owns the GL context and
+renders whenever mpv signals a new frame (`mpv_render_context_set_update_callback`).
+
+This matters because Compose stops executing draw lambdas during a live window resize — it replays a
+recorded picture instead. A player driven by the draw pass freezes while you drag the window. The
+producer keeps decoding and publishing regardless of what the UI thread is doing.
+
+**Triple buffering** keeps the two sides apart. Two buffers tear; with three, the producer always has
+a target that is neither the published frame nor the one currently being drawn:
 
 ```
-root_visual
-├── video_visual   ← D3D11 swapchain, opaque
-└── ui_visual      ← D3D12 swapchain, premultiplied alpha (drawn above)
+front   ← newest complete frame, published
+inuse   ← what the consumer is drawing right now
+back    ← neither of the above; the producer writes here
 ```
 
-The target is created **topmost**, so the tree composites in front of the window's AWT-painted
-content.
-
-**Video path.** mpv renders through **ANGLE**, initialized over AuraPlayer's *own* D3D11 device — so
-mpv's OpenGL output and the swapchain live on a single device with no cross-device interop. mpv draws
-into an EGL pbuffer backed by a D3D11 texture, which is copied to the swapchain backbuffer and
-presented. A dedicated render thread drives this, waking on mpv's update callback or on a pending
-resize.
-
-**UI path.** A second swapchain with premultiplied alpha is wrapped as a Skia
-`BackendRenderTarget`; Compose renders your controls straight into its backbuffer. Transparent pixels
-let the video show through.
-
-**Geometry.** `onGloballyPositioned` reports the surface's `boundsInRoot`, which is converted to
-physical pixels and pushed to the native visual offsets.
-
-### macOS — CoreAnimation
-
-A `CAMetalLayer` is inserted **beneath** the Compose layer in the window's layer hierarchy, and its
-frame tracks the surface as it moves and resizes. Z-order is set once at init; there is no per-frame
-compositing work on the JVM side.
-
-### Fallback — region clipping
-
-Where DirectComposition is unavailable, AuraPlayer falls back to the legacy approach: an AWT `Canvas`
-in the layered pane with a hole cut in the Skiko surface via `SetWindowRgn`. This is the **JAWT**
-path. It works, but overlays are not possible — UI cannot be drawn above video.
+The consumer calls `acquireFront()`, which publishes its index as `inuse` and returns it. Resizes are
+handled between frames without restarting the producer, so a quality switch or window resize doesn't
+interrupt playback.
 
 ### Rendering flow
 
 ```
-Compose layout (boundsInRoot)
+mpv decode + render  (producer thread)
         ↓
-Geometry pass → native rect (physical px)
+GPU texture  (D3D11 texture / IOSurface)
         ↓
-JNI Bridge
+imported on Skiko's device  (D3D12 resource / MTLTexture)
         ↓
-Compositor visual tree
+Skia Surface
         ↓
-┌───────────────┬────────────────┐
-│ Video layer   │ UI layer       │
-│ mpv → ANGLE   │ Compose → Skia │
-│ → D3D11       │ → D3D12        │
-└───────────────┴────────────────┘
-        ↓
-GPU compositor output
+Compose Canvas  →  drawn in normal z-order
 ```
+
+### Fullscreen and picture-in-picture
+
+Because the video is an ordinary composable, **fullscreen is a layout change**: the player is lifted
+into an overlay `Box` at the window root. No native geometry work, no surface re-creation, no
+flicker.
+
+**Picture-in-picture** opens a second always-on-top window that wires its own Skia surfaces to the
+same producer buffers — one decode, two views. The window keeps its OS shadow, snap behaviour and
+resize borders while hiding the title bar (`WM_NCCALCSIZE` on Windows, `NSWindowStyleMaskFullSizeContentView`
+on macOS), and locks its aspect ratio to the video's display dimensions.
 
 ---
 
@@ -161,19 +174,34 @@ GPU compositor output
 
 Windows additionally requires a Direct3D 11 capable GPU (feature level 11_0).
 
-Native libraries — `libmpv-2.dll`, `libEGL.dll`, `libGLESv2.dll` — are bundled in the jar and
-extracted at first launch. mpv does not need to be installed separately.
+Native libraries — `libmpv-2.dll`, `libEGL.dll`, `libGLESv2.dll` on Windows; `libmpv.dylib` on
+macOS — are bundled in the jar and extracted at first launch. mpv does not need to be installed
+separately.
 
 ---
 
 ## Current limitations
 
-- One DirectComposition-backed player per window (others fall back to region clipping)
-- Maximum 16 surfaces per window
-- HDR output is detected but not yet enabled — the swapchain is currently 8-bit
+- **SDR only.** HDR content plays (tone-mapped), but output is 8-bit. Skiko's swapchain format is
+  fixed, and widening it would put the entire Compose UI in an HDR colorspace.
+- Each player currently creates its own GPU device and GL context; sharing one across players is a
+  pending optimization.
+- Debug tracing is compiled in but silent — set `AURA_DEBUG=1` to enable it.
+
+---
+
+## Troubleshooting
+
+**Video is black but audio plays.** Skia caches a snapshot keyed to its own writes, so an externally
+written texture looks unchanged. `notifyContentWillChange(ContentChangeMode.RETAIN)` before every
+draw is what invalidates it. The signature symptom is black until a fullscreen toggle, then a single
+frozen frame.
+
+**Video is upside down.** GL renders bottom-up, Metal and Skia read top-down. Apply exactly one flip
+— either `MPV_RENDER_PARAM_FLIP_Y` or `SurfaceOrigin.BOTTOM_LEFT` — never both.
 
 ---
 
 ## License
 
-<!-- TODO ->
+<!-- TODO -->
