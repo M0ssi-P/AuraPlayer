@@ -15,7 +15,7 @@ object AuraPlayerLoader {
 
         val (folder, extension) = when {
             os.contains("win") -> "windows-x64" to ".dll"
-            os.contains("mac") -> (if (arch == "aarch64") "macos-arm64" else "macos-x64") to ".dylib"
+            os.contains("mac") -> "macos-x64" to ".dylib"
             else -> "linux-x64" to ".so"
         }
 

@@ -1,4 +1,5 @@
 name: Build Multi-Platform Natives and Release
+
 on:
   push:
     tags:
@@ -9,11 +10,17 @@ jobs:
     name: Build on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
+      # One platform failing shouldn't cancel the others — you still want the
+      # working artifacts to inspect.
+      fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
+        # NOTE: ubuntu-latest removed — model-2 has no Linux backend yet.
+        # See the comment block at the bottom of this file.
+        os: [windows-latest, macos-latest]
 
     steps:
       - uses: actions/checkout@v4
+
       - name: Setup JDK
         uses: actions/setup-java@v4
         with:
@@ -21,135 +28,155 @@ jobs:
           distribution: 'temurin'
 
       # ------------------------------------------------------------------
-      # Windows Build
+      # Windows
+      #
+      # Source list and link flags mirror the local Gradle `compileNative`
+      # task exactly. Note it links the .cpp files with plain `gcc`, not
+      # `g++` — deliberate, and matches what builds locally. If a C++ file
+      # ever starts using the C++ stdlib this will fail to link; the fix is
+      # to switch the link step to g++ (or add -lstdc++).
       # ------------------------------------------------------------------
       - name: Compile Windows DLL
         if: matrix.os == 'windows-latest'
+        shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+
           curl -L -o mpv-sdk.7z https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20260304/mpv-dev-x86_64-20260304-git-c401ef9.7z
           7z x mpv-sdk.7z -ompv-dev
 
-          gcc -shared -o native_render.dll `
-            auraplayer-core/src/main/c/native_player.c `
-            auraplayer-core/src/main/c/native_surface_win.c `
-            -Impv-dev/include `
-            -I"${{ env.JAVA_HOME }}/include" `
-            -I"${{ env.JAVA_HOME }}/include/win32" `
-            "${{ env.JAVA_HOME }}/lib/jawt.lib" `
-            mpv-dev/libmpv.dll.a
+          $NATIVE_DIR = "auraplayer-core/src/main/resources/nativelibs/windows-x64"
+          New-Item -ItemType Directory -Force -Path $NATIVE_DIR
 
-          New-Item -ItemType Directory -Force -Path "auraplayer-core/src/main/resources/nativelibs/windows-x64"
-          Move-Item -Force native_render.dll auraplayer-core/src/main/resources/nativelibs/windows-x64/
-          Copy-Item -Force mpv-dev/libmpv-2.dll auraplayer-core/src/main/resources/nativelibs/windows-x64/
+          $SRC = "auraplayer-core/src/main/c"
+
+          gcc -shared -fPIC `
+            -o native_render.dll `
+            "$SRC/jawt_win.c" `
+            "$SRC/native_render.c" `
+            "$SRC/dcomp_win.cpp" `
+            "$SRC/model2_texture.cpp" `
+            "$SRC/dcomp_ui.cpp" `
+            "$SRC/angle_win.c" `
+            "$SRC/aura_power_windows.cpp" `
+            -I "mpv-dev/include" `
+            -I "$env:JAVA_HOME/include" `
+            -I "$env:JAVA_HOME/include/win32" `
+            "mpv-dev/libmpv.dll.a" `
+            "$env:JAVA_HOME/lib/jawt.lib" `
+            -lgdi32 -luser32 -ld3d11 -ldxgi -ld3d12 -luuid -ldwmapi
+
+          Move-Item -Force native_render.dll "$NATIVE_DIR/"
+          Copy-Item -Force mpv-dev/libmpv-2.dll "$NATIVE_DIR/"
+
+          # --- ANGLE ---
+          # mpv's GL output goes through ANGLE, so libEGL.dll and libGLESv2.dll
+          # must ship. Prefer whatever is committed to the repo (that's the
+          # pair proven to work locally); fall back to the mpv-dev package.
+          foreach ($dll in @("libEGL.dll", "libGLESv2.dll")) {
+            if (Test-Path "$NATIVE_DIR/$dll") {
+              Write-Host "using committed $dll"
+            } elseif (Test-Path "mpv-dev/$dll") {
+              Copy-Item -Force "mpv-dev/$dll" "$NATIVE_DIR/"
+              Write-Host "took $dll from mpv-dev"
+            } else {
+              Write-Error "ANGLE dependency $dll not found — commit it under $NATIVE_DIR or add a download step. Model-2 cannot render without it."
+            }
+          }
+
+          Write-Host "=== windows-x64 payload ==="
+          Get-ChildItem $NATIVE_DIR
 
       # ------------------------------------------------------------------
-      # Linux Build
-      # ------------------------------------------------------------------
-      - name: Compile Linux SO
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          # FIX: libx11-dev is required by jawt_md.h on Linux
-          sudo apt-get install -y libmpv-dev libx11-dev
-
-          gcc -fPIC -shared -o libnative_render.so \
-            auraplayer-core/src/main/c/native_player.c \
-            auraplayer-core/src/main/c/native_surface_x11.c \
-            -I"${{ env.JAVA_HOME }}/include" \
-            -I"${{ env.JAVA_HOME }}/include/linux" \
-            -L"${{ env.JAVA_HOME }}/lib" \
-            -ljawt \
-            -lmpv
-
-          mkdir -p auraplayer-core/src/main/resources/nativelibs/linux-x64
-          mv libnative_render.so auraplayer-core/src/main/resources/nativelibs/linux-x64/
-        
-          cp /usr/lib/x86_64-linux-gnu/libmpv.so.2 auraplayer-core/src/main/resources/nativelibs/linux-x64/
-
-      # ------------------------------------------------------------------
-      # macOS Build
+      # macOS
+      #
+      # Same source list as local Gradle. Built universal (x86_64 + arm64)
+      # via two compile passes and lipo, because CI's JDK is single-arch and
+      # the JNI headers differ per JDK.
       # ------------------------------------------------------------------
       - name: Compile MacOS Dylib
         if: matrix.os == 'macos-latest'
         run: |
+          set -euo pipefail
+
           mkdir -p intel_jdk
           curl -L -o jdk_intel.tar.gz "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.2%2B13/OpenJDK21U-jdk_x64_mac_hotspot_21.0.2_13.tar.gz"
           tar -xzf jdk_intel.tar.gz -C intel_jdk --strip-components=1
           INTEL_JAVA_HOME="$(pwd)/intel_jdk/Contents/Home"
 
-          NATIVE_DIR="auraplayer-core/src/main/resources/nativelibs/macos-x64"
-          mkdir -p "$NATIVE_DIR"
+          STAGE="$(pwd)/mac-stage"
+          mkdir -p "$STAGE"
 
           curl -L -o libmpv-macos.zip \
             "https://github.com/M0ssi-P/mpv-macbuild/releases/latest/download/libmpv-macos.zip"
           unzip -o libmpv-macos.zip -d mpv-package
+          cp mpv-package/libmpv.dylib "$STAGE/libmpv.dylib"
+          lipo -archs "$STAGE/libmpv.dylib"
 
-          cp mpv-package/libmpv.dylib "$NATIVE_DIR/libmpv.dylib"
-          lipo -archs "$NATIVE_DIR/libmpv.dylib"
+          # Model-2 requires an mpv built WITH the OpenGL render backend.
+          if ! strings "$STAGE/libmpv.dylib" | grep -q "mpv_opengl_fbo"; then
+            echo "ERROR: libmpv.dylib has no OpenGL render backend — model-2 cannot work."
+            exit 1
+          fi
 
           mkdir -p auraplayer-core/src/main/c/include
           cp -r mpv-package/include/mpv auraplayer-core/src/main/c/include/mpv
           MPV_INC="$(pwd)/auraplayer-core/src/main/c/include"
           SRC="auraplayer-core/src/main/c"
 
-          # ---- x86_64 slice: portable core (C) + mac surface (ObjC/ARC) ----
-          clang -c "$SRC/native_render.c" -o native_render_x86.o \
-            -arch x86_64 -mmacosx-version-min=11.0 -fPIC \
-            -I"$INTEL_JAVA_HOME/include" -I"$INTEL_JAVA_HOME/include/darwin" \
-            -I"$MPV_INC"
+          # GL_SILENCE_DEPRECATION: CGL/GL are deprecated since 10.14 but fully
+          # functional; without it every call in the model-2 path warns.
+          COMMON="-fPIC -mmacosx-version-min=11.0 -DGL_SILENCE_DEPRECATION -I$MPV_INC"
 
-          clang -c "$SRC/jawt_macos.m" -o jawt_macos_x86.o \
-            -arch x86_64 -mmacosx-version-min=11.0 -fPIC -fobjc-arc \
-            -I"$INTEL_JAVA_HOME/include" -I"$INTEL_JAVA_HOME/include/darwin" \
-            -I"$MPV_INC"
+          FRAMEWORKS="-framework AppKit -framework QuartzCore -framework Foundation \
+            -framework OpenGL -framework CoreGraphics -framework CoreVideo \
+            -framework Metal -framework IOSurface -framework MediaPlayer \
+            -framework IOKit"
 
-          # ---- arm64 slice ----
-          clang -c "$SRC/native_render.c" -o native_render_arm.o \
-            -arch arm64 -mmacosx-version-min=11.0 -fPIC \
-            -I"${{ env.JAVA_HOME }}/include" -I"${{ env.JAVA_HOME }}/include/darwin" \
-            -I"$MPV_INC"
+          build_slice () {
+            local ARCH="$1" JH="$2" OUT="$3"
+            clang -c "$SRC/native_render.c" -o "nr_$ARCH.o" \
+              -arch "$ARCH" $COMMON -I"$JH/include" -I"$JH/include/darwin"
+            clang -c "$SRC/jawt_macos.m" -o "jm_$ARCH.o" \
+              -arch "$ARCH" $COMMON -fobjc-arc -I"$JH/include" -I"$JH/include/darwin"
+            clang -c "$SRC/aura_power_macos.m" -o "pw_$ARCH.o" \
+              -arch "$ARCH" $COMMON -fobjc-arc -I"$JH/include" -I"$JH/include/darwin"
 
-          clang -c "$SRC/jawt_macos.m" -o jawt_macos_arm.o \
-            -arch arm64 -mmacosx-version-min=11.0 -fPIC -fobjc-arc \
-            -I"${{ env.JAVA_HOME }}/include" -I"${{ env.JAVA_HOME }}/include/darwin" \
-            -I"$MPV_INC"
+            clang -dynamiclib "nr_$ARCH.o" "jm_$ARCH.o" "pw_$ARCH.o" \
+              -o "$OUT" -arch "$ARCH" \
+              -L"$JH/lib" -ljawt \
+              -L"$STAGE" -lmpv \
+              -Wl,-rpath,@loader_path \
+              $FRAMEWORKS
+          }
 
-          # FIX: dropped -framework OpenGL (nothing uses GL anymore).
-          # FIX: -rpath @loader_path so the @rpath/libmpv.dylib reference
-          #      resolves from the same directory the loader extracts to.
-          clang -dynamiclib native_render_x86.o jawt_macos_x86.o \
-            -o libnative_render_x86.dylib \
-            -arch x86_64 \
-            -L"$INTEL_JAVA_HOME/lib" -ljawt \
-            -L"$NATIVE_DIR" -lmpv \
-            -Wl,-rpath,@loader_path \
-            -framework AppKit -framework QuartzCore -framework Foundation \
-            -framework CoreGraphics
-
-          clang -dynamiclib native_player_arm.o jawt_macos_arm.o \
-            -o libnative_render_arm.dylib \
-            -arch arm64 \
-            -L"${{ env.JAVA_HOME }}/lib" -ljawt \
-            -L"$NATIVE_DIR" -lmpv \
-            -Wl,-rpath,@loader_path \
-            -framework AppKit -framework QuartzCore -framework Foundation \
-            -framework CoreGraphics
+          build_slice x86_64 "$INTEL_JAVA_HOME" libnative_render_x86.dylib
+          build_slice arm64  "${JAVA_HOME}"     libnative_render_arm.dylib
 
           lipo -create libnative_render_x86.dylib libnative_render_arm.dylib \
-            -output "$NATIVE_DIR/libnative_render.dylib"
+            -output "$STAGE/libnative_render.dylib"
 
-          xattr -cr "$NATIVE_DIR/libnative_render.dylib"
-          codesign --force -s - "$NATIVE_DIR/libnative_render.dylib"
+          xattr -cr "$STAGE/libnative_render.dylib"
+          codesign --force -s - "$STAGE/libnative_render.dylib"
+
+          # Both dylibs are universal (libmpv ships that way; native_render is
+          # lipo'd above), so one folder covers Intel and Apple Silicon.
+          OUT="auraplayer-core/src/main/resources/nativelibs/macos-x64"
+          mkdir -p "$OUT"
+          cp "$STAGE/libnative_render.dylib" "$OUT/"
+          cp "$STAGE/libmpv.dylib"           "$OUT/"
 
           echo "=== Final verification ==="
-          otool -L "$NATIVE_DIR/libnative_render.dylib"
-          lipo -archs "$NATIVE_DIR/libnative_render.dylib"
+          otool -L "$STAGE/libnative_render.dylib"
+          lipo -archs "$STAGE/libnative_render.dylib"
 
       - name: Make Gradle Wrapper Executable
         run: chmod +x gradlew
+        shell: bash
 
       - name: Build Fat JAR
         run: ./gradlew :auraplayer-core:jar
+        shell: bash
 
       - name: Upload Native Binary to Workflow
         uses: actions/upload-artifact@v4
@@ -165,6 +192,7 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
@@ -180,6 +208,25 @@ jobs:
       - name: Debug - List Resource Folder
         run: ls -R auraplayer-core/src/main/resources/nativelibs/
 
+      # Fail here rather than publishing a jar that silently drops a platform.
+      - name: Verify native payload
+        run: |
+          set -e
+          BASE=auraplayer-core/src/main/resources/nativelibs
+          REQUIRED="
+            $BASE/windows-x64/native_render.dll
+            $BASE/windows-x64/libmpv-2.dll
+            $BASE/windows-x64/libEGL.dll
+            $BASE/windows-x64/libGLESv2.dll
+            $BASE/macos-x64/libnative_render.dylib
+            $BASE/macos-x64/libmpv.dylib
+          "
+          MISSING=0
+          for f in $REQUIRED; do
+            if [ ! -f "$f" ]; then echo "MISSING: $f"; MISSING=1; else echo "ok: $f"; fi
+          done
+          [ "$MISSING" -eq 0 ] || { echo "Refusing to publish an incomplete jar."; exit 1; }
+
       - name: Make Gradle Wrapper Executable
         run: chmod +x gradlew
 
@@ -187,6 +234,7 @@ jobs:
         run: |
           if [ -z "${{ secrets.GPG_SIGNING_KEY }}" ]; then
             echo "ERROR: GPG_SIGNING_KEY is empty!"
+            exit 1
           else
             echo "SUCCESS: GPG_SIGNING_KEY is set."
           fi
@@ -208,3 +256,15 @@ jobs:
             auraplayer-compose/build/libs/*.jar
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+# ---------------------------------------------------------------------------
+# Linux
+#
+# The old job compiled native_player.c + native_surface_x11.c against the
+# system libmpv using the JAWT --wid path. Model-2 has no Linux backend yet —
+# there is no equivalent of the D3D11 shared-handle / IOSurface import.
+#
+# Likely shape when it lands: mpv renders GL into a DMA-BUF-backed texture,
+# imported into Skiko's Vulkan device via VK_EXT_external_memory_dma_buf,
+# then BackendRenderTarget.makeVulkan. Re-add the job once that exists.
+# ---------------------------------------------------------------------------
