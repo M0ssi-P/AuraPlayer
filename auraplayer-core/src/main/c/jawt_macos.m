@@ -20,7 +20,7 @@
 #include "jawt_macos.h"
 #include "aura_ctx.h"
 
-int aura_verbose = -1;
+extern int aura_verbose;
 
 #define M2_LOG(...) do {                                            \
     if (aura_verbose < 0)                                           \
