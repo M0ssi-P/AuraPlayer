@@ -42,7 +42,11 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          curl -L -o mpv-sdk.7z https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20260304/mpv-dev-x86_64-20260304-git-c401ef9.7z
+          $rel = Invoke-RestMethod "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest"
+          $url = ($rel.assets | Where-Object { $_.name -like "mpv-dev-x86_64-*.7z" } | Select-Object -First 1).browser_download_url
+          if (-not $url) { Write-Error "no mpv-dev asset in latest release" }
+          curl -fL -o mpv-sdk.7z $url
+          Write-Host "using $url"
           7z x mpv-sdk.7z -ompv-dev
 
           $NATIVE_DIR = "auraplayer-core/src/main/resources/nativelibs/windows-x64"
@@ -114,7 +118,7 @@ jobs:
           lipo -archs "$STAGE/libmpv.dylib"
 
           # Model-2 requires an mpv built WITH the OpenGL render backend.
-          if ! strings "$STAGE/libmpv.dylib" | grep -q "mpv_opengl_fbo"; then
+          if ! (set +o pipefail; strings "$STAGE/libmpv.dylib" | grep -q "mpv_opengl_fbo"); then
             echo "ERROR: libmpv.dylib has no OpenGL render backend — model-2 cannot work."
             exit 1
           fi

@@ -47,7 +47,7 @@ fun main() {
             val player = remember { AuraPlayer() }
 
             LaunchedEffect(player) {
-                player.loadWhenReady("https://pub-0400bba999e94d4da2149a2f1d2d06a6.r2.dev/hls/master.m3u8")
+                player.loadWhenReady("https://youtu.be/nPV9Fvo59L0?list=RDnPV9Fvo59L0")
             }
 
             AuraPlayerHost(window) {
