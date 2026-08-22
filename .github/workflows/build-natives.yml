@@ -78,14 +78,11 @@ jobs:
           # must ship. Prefer whatever is committed to the repo (that's the
           # pair proven to work locally); fall back to the mpv-dev package.
           foreach ($dll in @("libEGL.dll", "libGLESv2.dll")) {
-            if (Test-Path "$NATIVE_DIR/$dll") {
-              Write-Host "using committed $dll"
-            } elseif (Test-Path "mpv-dev/$dll") {
-              Copy-Item -Force "mpv-dev/$dll" "$NATIVE_DIR/"
-              Write-Host "took $dll from mpv-dev"
-            } else {
-              Write-Error "ANGLE dependency $dll not found — commit it under $NATIVE_DIR or add a download step. Model-2 cannot render without it."
+            $srcDll = "$SRC/$dll"
+            if (-not (Test-Path $srcDll)) {
+              Write-Error "$dll not found at $srcDll — model-2 cannot render without it."
             }
+            Copy-Item -Force $srcDll "$NATIVE_DIR/"
           }
 
           Write-Host "=== windows-x64 payload ==="
