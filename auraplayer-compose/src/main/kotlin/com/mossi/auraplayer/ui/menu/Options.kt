@@ -23,6 +23,7 @@ import androidx.compose.material.Slider
 import androidx.compose.material.SliderDefaults
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -61,6 +62,7 @@ fun TracksOptions(player: AuraPlayer) {
     val currentTrack by player.currentTrack.collectAsState()
     val subs = tracks.filter { it.type == "audio" }
     val currentSub = currentTrack.find { it.type == "audio" }
+
     Column(modifier = Modifier.fillMaxWidth()) {
         OptionRow("Off", selected = false) { player.setTrack("aid", "no") }
         subs.forEach { t ->

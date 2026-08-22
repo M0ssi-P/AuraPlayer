@@ -101,13 +101,13 @@ val compileNative by tasks.registering(Exec::class) {
             "${nativeSrcDir.absolutePath}/model2_texture.cpp",
             "${nativeSrcDir.absolutePath}/dcomp_ui.cpp",
             "${nativeSrcDir.absolutePath}/angle_win.c",
-            "${nativeSrcDir.absolutePath}/aura_power_windows.m",
+            "${nativeSrcDir.absolutePath}/aura_power_windows.cpp",
             "-I", "C:/deps/mpv-sdk/include",
             "-I", "$jdkHome/include",
             "-I", "$jdkHome/include/win32",
             "C:/deps/mpv-sdk/libmpv.dll.a",
             "$jdkHome/lib/jawt.lib",
-            "-lgdi32", "-luser32", "-ld3d11", "-ldxgi", "-ld3d12", "-luuid"
+            "-lgdi32", "-luser32", "-ld3d11", "-ldxgi", "-ld3d12", "-luuid", "-ldwmapi"
         )
 
         os.isMacOsX -> listOf(

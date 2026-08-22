@@ -12,9 +12,9 @@ flicker, no z-order hacks, and no heavyweight/lightweight mixing problems.
 
 | Player with controls                       | Settings popover                             |
 |--------------------------------------------|----------------------------------------------|
-| ![Player](src/main/screenshots/image2.png) | ![Settings](src/main/screenshots/image1.png) |
+| ![Player](src/main/screenshots/image1.png) | ![Settings](src/main/screenshots/image2.png) |
 
-> Screenshots live in `sr/main/screenshots/`. Rename the files above to match what's actually in that folder.
+> Screenshots live in `sr/main/screenshots/`. Also, I will update the readME.md when i have time.
 
 ---
 
@@ -43,13 +43,10 @@ Compose integration. Most projects want both.
 ### Gradle (Kotlin DSL)
 
 ```kotlin
-repositories {
-    mavenCentral()
-}
-
+// build.gradle.kts
 dependencies {
-    implementation("com.mossi:auraplayer-core:0.1.6")
-    implementation("com.mossi:auraplayer-compose:0.1.6")
+    implementation("io.github.m0ssi-p:auraplayer-core:<version>")     // engine (no Compose dep) - good for other frameworks
+    implementation("io.github.m0ssi-p:auraplayer-compose:<version>")  // Compose integration - this comes with core
 }
 ```
 
@@ -57,8 +54,8 @@ dependencies {
 
 ```groovy
 dependencies {
-    implementation 'com.mossi:auraplayer-core:0.1.6'
-    implementation 'com.mossi:auraplayer-compose:0.1.6'
+    implementation 'io.github.m0ssi-p:auraplayer-core:<version>'
+    implementation 'io.github.m0ssi-p:auraplayer-core:<version>'
 }
 ```
 

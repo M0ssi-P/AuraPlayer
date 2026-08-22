@@ -71,7 +71,6 @@ typedef struct AuraCtx {
     volatile LONG    m2_pend_h;
     EGLSurface       m2_surf[3];
     ID3D11Texture2D *m2_tex[3];
-    int              m2_w, m2_h;
     volatile LONG    m2_front;     /* newest complete frame */
     volatile LONG    m2_inuse;     /* what the consumer is drawing */
     volatile LONG    m2_running;

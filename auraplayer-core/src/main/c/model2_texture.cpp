@@ -11,8 +11,24 @@
 #include <mpv/render_gl.h>
 #include "aura_ctx.h"
 
-#define M2_LOG(...) do { fprintf(stderr, "[model2] " __VA_ARGS__); \
-                         fprintf(stderr, "\n"); fflush(stderr); } while (0)
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+extern int aura_verbose;
+
+#ifdef __cplusplus
+}
+#endif
+
+#define M2_LOG(...) do {                                            \
+    if (aura_verbose < 0)                                           \
+        aura_verbose = getenv("AURA_DEBUG") ? 1 : 0;                \
+    if (aura_verbose) {                                             \
+        fprintf(stderr, "[model2] " __VA_ARGS__);                   \
+        fprintf(stderr, "\n"); fflush(stderr);                      \
+    }                                                               \
+} while (0)
 
 static void debug_dump_texture_to_bmp(ID3D11Device *device, ID3D11DeviceContext *context,
                                        ID3D11Texture2D *src_tex, const char *filename)
@@ -246,7 +262,7 @@ static unsigned __stdcall m2_producer(void *arg)
         if (!e->MakeCurrent(c->egl_dpy, c->m2_surf[back], c->m2_surf[back], c->egl_ctx)) {
             static int mc = 0;
             if (mc++ < 10) M2_LOG("producer MakeCurrent failed 0x%04x", e->GetError());
-               continue;
+            continue;
         }
 
         mpv_opengl_fbo fbo = {};
@@ -446,7 +462,7 @@ Java_com_mossip_auraplayer_engine_Model2_releaseNative(
 {
     if (!resPtr) return;
     ID3D12Resource *r = (ID3D12Resource *)(intptr_t)resPtr;
-    r->lpVtbl->Release(r);      /* the +1 from OpenSharedHandle in wrapNative */
+    r->Release();
 }
 
 #endif

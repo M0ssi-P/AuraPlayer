@@ -143,7 +143,7 @@ internal object MacSkiaSurfaceStrategy : VideoSurfaceStrategy {
 
                 debugFrameCounter++
                 if (debugFrameCounter % 30 == 0) {
-                    println("AuraPlayer DEBUG(mac): tick=$tick wired=$wired i=$i sNull=${s == null} wiredWH=${consumer.wiredW}x${consumer.wiredH}")
+//                    println("AuraPlayer DEBUG(mac): tick=$tick wired=$wired i=$i sNull=${s == null} wiredWH=${consumer.wiredW}x${consumer.wiredH}")
                 }
 
                 if (s == null || consumer.wiredW == 0 || consumer.wiredH == 0) {

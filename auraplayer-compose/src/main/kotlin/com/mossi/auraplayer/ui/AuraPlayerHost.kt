@@ -14,6 +14,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.awt.ComposeWindow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.LayoutCoordinates
+import com.mossip.auraplayer.engine.AuraPlayer
+import java.util.concurrent.ConcurrentHashMap
 
 internal val LocalAuraHost = staticCompositionLocalOf<AuraHostState?> { null }
 internal val LocalComposeWindow = staticCompositionLocalOf<ComposeWindow?> { null }
@@ -69,7 +71,11 @@ fun AuraPlayerHost(
                         // App-provided controls for the fullscreen player are
                         // supplied by whichever AuraPlayerSurface call site
                         // owns it — see fullscreenControls below.
-                        fullscreenControls[fsPlayer]?.invoke(this)
+                        if (isPip) {
+                            pipControls[fsPlayer]?.invoke(this)
+                        } else {
+                            fullscreenControls[fsPlayer]?.invoke(this)
+                        }
                     }
                 }
             }
@@ -80,5 +86,5 @@ fun AuraPlayerHost(
 /** Lets the inline AuraPlayerSurface call site hand its `controls` lambda to
  *  the fullscreen overlay when that player becomes the fullscreen owner,
  *  without threading it through the coordinator itself. */
-internal val fullscreenControls =
-    java.util.concurrent.ConcurrentHashMap<com.mossip.auraplayer.engine.AuraPlayer, @Composable BoxScope.() -> Unit>()
+internal val fullscreenControls = ConcurrentHashMap<AuraPlayer, @Composable BoxScope.() -> Unit>()
+internal val pipControls = ConcurrentHashMap<AuraPlayer, @Composable BoxScope.() -> Unit>()

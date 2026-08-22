@@ -35,15 +35,20 @@ sealed interface MenuPage {
 @Composable
 fun RootPage(player: AuraPlayer, onNavigate: (MenuPage) -> Unit) {
     val speed by player.speed.collectAsState()
+    val currentTrack by player.currentTrack.collectAsState()
+
     Column(Modifier.width(400.dp).padding(vertical = 8.dp)) {
-        MenuRow("icons/caption.svg", "Subtitles/CC", "English",
+        MenuRow("icons/caption.svg", "Subtitles/CC",
+            if (currentTrack.find { it.type == "sub" } != null) "${currentTrack.find { it.type == "sub" }?.lang}" else "OFF",
             onClick = { onNavigate(MenuPage.Subtitles) })
-        MenuRow("icons/mic.svg", "Tracks", "English",
+        MenuRow("icons/mic.svg", "Tracks",
+            if (currentTrack.find { it.type == "audio" } != null) "${currentTrack.find { it.type == "audio" }?.lang}" else "OFF",
             onClick = { onNavigate(MenuPage.Tracks) })
         MenuRow("icons/speed.svg", "Playback speed",
             if (speed == 1.0) "Normal" else "${speed}x",
             onClick = { onNavigate(MenuPage.Speed) })
-        MenuRow("icons/quality.svg", "Quality", "Auto (480p)",
+        MenuRow("icons/quality.svg", "Quality",
+            if (currentTrack.find { it.type == "audio" } != null) "${currentTrack.find { it.type == "video" }?.height}p" else "Auto (480p)",
             onClick = { onNavigate(MenuPage.Quality) })
         MenuRow("icons/speed.svg", "Audio devices",
             if (speed == 1.0) "Normal" else "${speed}x",

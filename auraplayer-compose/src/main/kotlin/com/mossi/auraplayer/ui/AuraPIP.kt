@@ -18,6 +18,8 @@ import com.mossi.auraplayer.ui.control.PipOverlay
 import com.mossip.auraplayer.engine.AuraPlayer
 import com.mossip.auraplayer.engine.Model2
 import java.awt.Dimension
+import java.awt.event.WindowAdapter
+import java.awt.event.WindowEvent
 import javax.swing.SwingUtilities
 
 /**
@@ -57,8 +59,8 @@ object AuraPiP {
 
         AuraPlaybackCoordinator.pipWindowCloser = { closeInternal() }
 
-        win.addWindowListener(object : java.awt.event.WindowAdapter() {
-            override fun windowClosing(e: java.awt.event.WindowEvent) {
+        win.addWindowListener(object : WindowAdapter() {
+            override fun windowClosing(e: WindowEvent) {
                 AuraPlaybackCoordinator.exitPiP(player)
             }
         })
@@ -69,6 +71,7 @@ object AuraPiP {
             LaunchedEffect(aspect) {
                 if (aspect > 0f) Model2.setAspect(win.windowHandle, aspect)
             }
+
             AuraPlayerHost(win, true) {
                 AuraPlayerSurface(player, Modifier.fillMaxSize(), controls = {
                     PipOverlay(

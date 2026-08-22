@@ -19,6 +19,7 @@
 #include "jawt_macos.h"
 
 static JavaVM *g_vm = NULL;
+int aura_verbose = -1;
 
 static AuraCtx *ctx_of(jlong handle)
 {
@@ -355,7 +356,7 @@ JNIEXPORT void JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_initializeRe
     mpv_set_option_string(c->mpv, "hls-bitrate",            "max");
     mpv_set_option_string(c->mpv, "keep-open",              "yes");
     mpv_set_option_string(c->mpv, "audio-channels",         "stereo");
-    mpv_set_property_string(c->mpv, "terminal", "yes");
+//    mpv_set_property_string(c->mpv, "terminal", "yes");
     mpv_set_option_string(c->mpv, "ytdl",                   "yes");
 
     /* --- render-API path: REPLACES the whole audioOnly/surface branch ---

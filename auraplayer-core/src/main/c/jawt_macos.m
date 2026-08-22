@@ -20,8 +20,16 @@
 #include "jawt_macos.h"
 #include "aura_ctx.h"
 
-#define M2_LOG(...) do { fprintf(stderr, "[model2-mac] " __VA_ARGS__); \
-                         fprintf(stderr, "\n"); fflush(stderr); } while (0)
+int aura_verbose = -1;
+
+#define M2_LOG(...) do {                                            \
+    if (aura_verbose < 0)                                           \
+        aura_verbose = getenv("AURA_DEBUG") ? 1 : 0;                \
+    if (aura_verbose) {                                             \
+        fprintf(stderr, "[model2] " __VA_ARGS__);                   \
+        fprintf(stderr, "\n"); fflush(stderr);                      \
+    }                                                               \
+} while (0)
 
 @interface AuraMetalLayer : CAMetalLayer
 @end

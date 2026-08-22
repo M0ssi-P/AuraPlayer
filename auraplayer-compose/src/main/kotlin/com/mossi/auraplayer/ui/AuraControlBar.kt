@@ -123,9 +123,10 @@ fun AuraControlBar(
             .fillMaxSize()
             .onPointerEvent(PointerEventType.Enter) { inside = true; lastActivity = System.nanoTime() }
             .onPointerEvent(PointerEventType.Exit)  { inside = false }
-            .onPointerEvent(PointerEventType.Move)  { lastActivity = System.nanoTime(); println("moving") }
+            .onPointerEvent(PointerEventType.Move)  { lastActivity = System.nanoTime(); }
             .pointerInput(Unit) {
-                detectTapGestures(onDoubleTap = { }) {
+                detectTapGestures(onDoubleTap = { AuraPlaybackCoordinator.toggleFullscreen(player) }) {
+                    player.setPause(playing)
                     lastActivity = System.nanoTime()
                 }
             }

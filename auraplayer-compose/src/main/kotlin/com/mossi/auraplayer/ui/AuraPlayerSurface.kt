@@ -31,16 +31,27 @@ fun AuraPlayerSurface(
     modifier: Modifier = Modifier,
     controls: @Composable BoxScope.() -> Unit = {},
 ) {
+    val isPiPHere = AuraPlaybackCoordinator.pipPlayer === player
     // Publish this call site's controls so the fullscreen overlay (owned by
     // AuraPlayerHost, which has no idea what your controls look like) can
     // render them when this player is promoted to fullscreen.
     DisposableEffect(player, controls) {
-        fullscreenControls[player] = controls
-        onDispose { fullscreenControls.remove(player, controls) }
+        if(isPiPHere) {
+            pipControls[player] = controls
+        } else {
+            fullscreenControls[player] = controls
+        }
+
+        onDispose {
+            if(isPiPHere) {
+                pipControls[player] = controls
+            } else {
+                fullscreenControls.remove(player, controls)
+            }
+        }
     }
 
     val isFullscreenHere = AuraPlaybackCoordinator.fullscreenPlayer === player
-    val isPiPHere = AuraPlaybackCoordinator.pipPlayer === player
 
     if (isFullscreenHere || isPiPHere) {
         // The live view now lives elsewhere (host overlay / PiP window).
