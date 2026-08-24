@@ -53,6 +53,8 @@ internal class MacConsumerResources(
     @Volatile var wiredW = 0
     @Volatile var wiredH = 0
 
+    @Volatile var warned = false
+
     /** Must run on the Skiko render thread for the owning window. */
     fun closeOnDrawThread() {
         for (i in 0..2) {
@@ -84,6 +86,10 @@ internal object MacVideoRegistry {
      *  doesn't itself require a live mpv render context at call time. */
     private fun ensureProducerNative(p: MacProducerResources) {
         if (p.nativeReady) return
+        require(!p.player.isAudioOnly) {
+            "AuraPlayer: this player was initialized audio-only and has no video " +
+                    "pipeline — don't compose AuraPlayerSurface with it."
+        }
         Model2.initRender(p.player.nativeCtx)
         p.player.initializeRenderApi()
         p.nativeReady = true

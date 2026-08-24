@@ -35,6 +35,19 @@ data class MediaTrack(
     val height: Int = 0,
 )
 
+data class Metadata(
+    val artist: String?,
+    val albumArtist: String?,
+    val album: String?,
+    val year: String?,
+    val genre: String?,
+    val composer: String?,
+    val trackNumber: Int?,
+    val discNumber: Int?,
+    val comment: String?,
+    val lyrics: String?,
+)
+
 data class AudioDevice(val id: String, val description: String)
 
 data class NowPlayingConfig(
@@ -176,11 +189,26 @@ class AuraPlayer {
         if (w > 0 && h > 0) w.toFloat() / h else 0f
     }.stateIn(playerScope, SharingStarted.Eagerly, 0f)
 
+    private val _metadata = MutableStateFlow<Map<String, String>>(emptyMap())
+    val metadata: StateFlow<Map<String, String>> = _metadata.asStateFlow()
+
+    private val _mediaTitle = MutableStateFlow<String?>(null)
+    val mediaTitle: StateFlow<String?> = _mediaTitle.asStateFlow()
+    private fun tag(vararg names: String): String? =
+        metadata.value.entries.firstOrNull { e ->
+            names.any { it.equals(e.key, ignoreCase = true) ||
+                    it.replace("_", "").equals(e.key.replace("_", ""), true) }
+        }?.value?.takeIf { it.isNotBlank() }
+
     private var handle: Long = 0L
     private var nowPlayingSetupDone = false
     val nativeCtx: Long get() = handle
 
     var videoHandle: Long = 0L
+        private set
+
+    @Volatile
+    var isAudioOnly: Boolean = false
         private set
 
     var host: AuraSurfaceHost? = null
@@ -212,11 +240,11 @@ class AuraPlayer {
      * window. The render context is created later (dcompCreateRenderContext)
      * once the first video rect exists. Called by AuraHostState.register()
      * after dcompInit succeeds. */
-    fun initializeRenderApi() {
+    fun initializeRenderApi(audioOnly: Boolean = false) {
         if (_isInitialized.value || handle == 0L) return
-        initializeRenderApiNative(handle)
+        isAudioOnly = audioOnly
+        initializeRenderApiNative(handle, audioOnly)
         println("INIT: ctx=$handle (render-api, no wid)")
-        /* DComp composites with per-pixel alpha — overlay always available. */
         _overlayMode.value = OverlayMode.OVER_VIDEO
         _isInitialized.value = true
     }
@@ -237,6 +265,38 @@ class AuraPlayer {
     suspend fun loadWhenReady(url: String) {
         isInitialized.first { it }
         loadFile(url)
+    }
+
+    @Suppress("unused")   // called from native
+    private fun onNativeMetadata(kv: Array<String>) {
+        _metadata.value = buildMap {
+            for (i in kv.indices step 2) put(kv[i], kv.getOrElse(i + 1) { "" })
+        }
+
+        val mets = Metadata(
+            artist      = tag("artist"),
+            albumArtist = tag("album_artist", "albumartist", "band"),
+            album       = tag("album") ,
+            year        = tag("date", "year")?.take(4),
+            genre       = tag("genre"),
+            composer    = tag("composer"),
+            trackNumber = tag("track", "track_id")?.substringBefore('/')?.toIntOrNull(),
+            discNumber  = tag("disc")?.substringBefore('/')?.toIntOrNull(),
+            comment     = tag("comment", "description"),
+            lyrics      = tag("lyrics", "unsyncedlyrics", "USLT"),
+        )
+    }
+
+    @Suppress("unused")
+    private fun onNativeTitle(title: String) {
+        _mediaTitle.value = title.ifBlank { null }
+    }
+
+    private external fun getMetadataNative(handle: Long): Array<String>?
+
+    fun refreshMetadata() {
+        val kv = getMetadataNative(handle) ?: return
+        onNativeMetadata(kv)
     }
 
     /* ---------------------------- fullscreen ------------------------------ */
@@ -397,7 +457,7 @@ class AuraPlayer {
     private external fun initializeNative(handle: Long, canvas: Canvas, audioOnly: Boolean): Long
     /* [DCOMP] mpv handle init without wid/JAWT — see initializeRenderApi().
      * C symbol: Java_com_mossip_auraplayer_engine_AuraPlayer_initializeRenderApiNative */
-    private external fun initializeRenderApiNative(handle: Long)
+    private external fun initializeRenderApiNative(handle: Long, audioOnly: Boolean)
     private external fun terminateNative(handle: Long)
     private external fun loadFile(handle: Long, url: String)
     private external fun setPause(handle: Long, pause: Boolean)

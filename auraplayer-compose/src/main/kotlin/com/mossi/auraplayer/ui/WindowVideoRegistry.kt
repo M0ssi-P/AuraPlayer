@@ -63,6 +63,8 @@ internal class ConsumerResources(
     @Volatile var wiredW = 0
     @Volatile var wiredH = 0
 
+    @Volatile var warned = false
+
     /** Must run on the Skiko render thread for the owning window. */
     fun closeOnDrawThread() {
         for (i in 0..2) {
@@ -93,8 +95,13 @@ internal object WindowsVideoRegistry {
      *  or mpv gives up opening vo=libmpv before a render context exists. */
     private fun ensureProducerNative(p: ProducerResources) {
         if (p.nativeReady) return
+        if (p.nativeReady) return
+        require(!p.player.isAudioOnly) {
+            "AuraPlayer: this player was initialized audio-only and has no video " +
+                    "pipeline — don't compose AuraPlayerSurface with it."
+        }
         Model2.initRender(p.player.nativeCtx)
-        Model2.createRenderContext(p.player.nativeCtx)   // before initializeRenderApi()
+        Model2.createRenderContext(p.player.nativeCtx)
         p.player.initializeRenderApi()
         p.nativeReady = true
     }

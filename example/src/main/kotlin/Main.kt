@@ -2,6 +2,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -14,7 +15,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import com.mossi.auraplayer.ui.AuraControlBar
+import com.mossi.auraplayer.ui.AuraAudioSurface
 import com.mossi.auraplayer.ui.AuraPlayerHost
 import com.mossi.auraplayer.ui.AuraPlayerSurface
 import com.mossi.auraplayer.ui.LocalPlayerBounds
@@ -35,6 +36,7 @@ fun main() {
 //        LaunchedEffect(hasPlayerInitialized) {
 //            if(hasPlayerInitialized) {
 //                engine.loadFile("https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8")
+//        https://pub-0400bba999e94d4da2149a2f1d2d06a6.r2.dev/hls/master.m3u8
 //            }
 //        }
 
@@ -59,11 +61,6 @@ fun main() {
                             player,
                             modifier = Modifier.onGloballyPositioned { playerCoords = it }.aspectRatio(16f / 9f)
                                 .align(Alignment.CenterHorizontally),
-                            controls = {
-                                AuraControlBar(
-                                    player,
-                                )
-                            }
                         )
                     }
                 }

@@ -29,7 +29,7 @@ import com.mossip.auraplayer.engine.AuraPlayer
 fun AuraPlayerSurface(
     player: AuraPlayer,
     modifier: Modifier = Modifier,
-    controls: @Composable BoxScope.() -> Unit = {},
+    controls: @Composable BoxScope.() -> Unit = { AuraControlBar(player) },
 ) {
     val isPiPHere = AuraPlaybackCoordinator.pipPlayer === player
     // Publish this call site's controls so the fullscreen overlay (owned by

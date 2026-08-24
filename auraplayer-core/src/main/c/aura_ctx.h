@@ -43,6 +43,7 @@ typedef struct AuraCtx {
     int64_t             wid;
     int                 m2_w;
     int                 m2_h;
+    int                 audio_only;
 
 #ifdef _WIN32
     IDXGIAdapter1      *ui_adapter;

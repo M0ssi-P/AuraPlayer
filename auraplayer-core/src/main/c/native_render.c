@@ -52,6 +52,33 @@ static int get_internal_state(AuraCtx *c)
     return STATE_PLAYING;
 }
 
+static jobjectArray metadata_to_array(JNIEnv *env, mpv_node *node)
+{
+    if (!node || node->format != MPV_FORMAT_NODE_MAP) return NULL;
+    mpv_node_list *list = node->u.list;
+    if (!list || list->num <= 0) return NULL;
+
+    jclass strCls = (*env)->FindClass(env, "java/lang/String");
+    if (!strCls) return NULL;
+
+    jobjectArray arr = (*env)->NewObjectArray(env, list->num * 2, strCls, NULL);
+    if (!arr) { (*env)->DeleteLocalRef(env, strCls); return NULL; }
+
+    for (int i = 0; i < list->num; i++) {
+        const char *k = list->keys[i];
+        const char *v = (list->values[i].format == MPV_FORMAT_STRING)
+                        ? list->values[i].u.string : "";
+        jstring jk = (*env)->NewStringUTF(env, k ? k : "");
+        jstring jv = (*env)->NewStringUTF(env, v ? v : "");
+        (*env)->SetObjectArrayElement(env, arr, i * 2,     jk);
+        (*env)->SetObjectArrayElement(env, arr, i * 2 + 1, jv);
+        (*env)->DeleteLocalRef(env, jk);
+        (*env)->DeleteLocalRef(env, jv);
+    }
+    (*env)->DeleteLocalRef(env, strCls);
+    return arr;
+}
+
 #ifdef _WIN32
 static unsigned __stdcall event_loop(void *arg) {
 #define THREAD_RETURN 0
@@ -73,6 +100,8 @@ static void *event_loop(void *arg) {
     jmethodID onVolumeChanged   = (*env)->GetMethodID(env, cls, "onNativeVolumeChange",   "(D)V");
     jmethodID onMuteChanged     = (*env)->GetMethodID(env, cls, "onNativeMuteChange",     "(Z)V");
     jmethodID onSpeedChanged    = (*env)->GetMethodID(env, cls, "onNativeSpeedChange",    "(D)V");
+    jmethodID onNativeMetadata  = (*env)->GetMethodID(env, cls, "onNativeMetadata",       "([Ljava/lang/String;)V");
+    jmethodID onNativeTitle     = (*env)->GetMethodID(env, cls, "onNativeTitle",          "(Ljava/lang/String;)V");
 
     jmethodID onVideoSizeChanged = (*env)->GetMethodID(env, cls, "onNativeVideoSizeChange", "(II)V");
     if (!onStateChanged || !onTimeChanged || !onDurationChanged || !onTracksChanged) {
@@ -106,6 +135,20 @@ static void *event_loop(void *arg) {
                     if (onVideoSizeChanged && last_dwidth > 0 && last_dheight > 0)
                         (*env)->CallVoidMethod(env, c->jself, onVideoSizeChanged,
                         (jint)last_dwidth, (jint)last_dheight);
+
+                } else if (strcmp(prop->name, "metadata") == 0 &&
+                           prop->format == MPV_FORMAT_NODE) {
+                    jobjectArray arr = metadata_to_array(env, (mpv_node *)prop->data);
+                    if (arr && onNativeMetadata) {
+                        (*env)->CallVoidMethod(env, c->jself, onNativeMetadata, arr);
+                        (*env)->DeleteLocalRef(env, arr);
+                    }
+                } else if (strcmp(prop->name, "media-title") == 0 &&
+                           prop->format == MPV_FORMAT_STRING) {
+                    const char *t = *(char **)prop->data;
+                    jstring js = (*env)->NewStringUTF(env, t ? t : "");
+                    if (onNativeTitle) (*env)->CallVoidMethod(env, c->jself, onNativeTitle, js);
+                    (*env)->DeleteLocalRef(env, js);
                 } else if (strcmp(prop->name, "volume") == 0 && prop->format == MPV_FORMAT_DOUBLE) {
                     (*env)->CallVoidMethod(env, c->jself, onVolumeChanged, *(double *)prop->data);
                 } else if (strcmp(prop->name, "mute") == 0 && prop->format == MPV_FORMAT_FLAG) {
@@ -342,32 +385,50 @@ JNIEXPORT jlong JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_initializeN
     return (jlong)wid;
 }
 
+JNIEXPORT jobjectArray JNICALL
+Java_com_mossip_auraplayer_engine_AuraPlayer_getMetadataNative(
+    JNIEnv *env, jobject obj, jlong handle)
+{
+    (void)obj;
+    AuraCtx *c = ctx_of(handle);
+    if (!c || !c->mpv) return NULL;
+
+    mpv_node node;
+    if (mpv_get_property(c->mpv, "metadata", MPV_FORMAT_NODE, &node) < 0)
+        return NULL;
+
+    jobjectArray arr = metadata_to_array(env, &node);
+    mpv_free_node_contents(&node);
+    return arr;
+}
+
 JNIEXPORT void JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_initializeRenderApiNative(
-    JNIEnv *env, jobject thiz, jlong handle)
+    JNIEnv *env, jobject thiz, jlong handle, jboolean audioOnly)
 {
     (void)env; (void)thiz;
     AuraCtx *c = ctx_of(handle);
     if (!c || !c->mpv) return;
 
-    /* --- shared options: identical to initializeNative --- */
+    c->audio_only = audioOnly ? 1 : 0;
+
+    /* --- shared options --- */
     mpv_set_option_string(c->mpv, "demuxer-max-bytes",      "150M");
     mpv_set_option_string(c->mpv, "demuxer-max-back-bytes", "50M");
     mpv_set_option_string(c->mpv, "ytdl",                   "yes");
     mpv_set_option_string(c->mpv, "hls-bitrate",            "max");
     mpv_set_option_string(c->mpv, "keep-open",              "yes");
     mpv_set_option_string(c->mpv, "audio-channels",         "stereo");
-//    mpv_set_property_string(c->mpv, "terminal", "yes");
-    mpv_set_option_string(c->mpv, "ytdl",                   "yes");
 
-    /* --- render-API path: REPLACES the whole audioOnly/surface branch ---
-     * No JAWT, no canvas, no wid, no gpu-api/gpu-context: mpv never owns
-     * a window. vo=libmpv puts mpv in render-API mode; frames are pulled
-     * by mpv_render_context (created later by dcompCreateRenderContext). */
-    mpv_set_option_string(c->mpv, "vo", "libmpv");
-    mpv_set_option_string(c->mpv, "target-colorspace-hint", "no");
-    mpv_set_option_string(c->mpv, "d3d11-output-format", "rgb10_a2");
+    if (audioOnly) {
+        mpv_set_option_string(c->mpv, "vid",           "no");
+        mpv_set_option_string(c->mpv, "vo",            "null");
+        mpv_set_option_string(c->mpv, "audio-display", "no");
+    } else {
+        mpv_set_option_string(c->mpv, "vo", "libmpv");
+        mpv_set_option_string(c->mpv, "target-colorspace-hint", "no");
+        mpv_set_option_string(c->mpv, "d3d11-output-format", "rgb10_a2");
     #ifdef _WIN32
-        mpv_set_option_string(c->mpv, "hwdec", "no");  /* -> ANGLE interop */
+        mpv_set_option_string(c->mpv, "hwdec", "no");
         mpv_set_option_string(c->mpv, "target-prim", "bt.709");
         mpv_set_option_string(c->mpv, "target-trc",  "srgb");
         if (c->hdr_active) {
@@ -378,8 +439,9 @@ JNIEXPORT void JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_initializeRe
     #else
         mpv_set_option_string(c->mpv, "hwdec", "auto-safe");
     #endif
+    }
 
-    /* --- observes: identical to initializeNative --- */
+    /* --- observes --- */
     mpv_observe_property(c->mpv, 0, "time-pos",               MPV_FORMAT_DOUBLE);
     mpv_observe_property(c->mpv, 0, "duration",               MPV_FORMAT_DOUBLE);
     mpv_observe_property(c->mpv, 0, "pause",                  MPV_FORMAT_FLAG);
@@ -389,23 +451,36 @@ JNIEXPORT void JNICALL Java_com_mossip_auraplayer_engine_AuraPlayer_initializeRe
     mpv_observe_property(c->mpv, 0, "volume",                 MPV_FORMAT_DOUBLE);
     mpv_observe_property(c->mpv, 0, "mute",                   MPV_FORMAT_FLAG);
     mpv_observe_property(c->mpv, 0, "speed",                  MPV_FORMAT_DOUBLE);
-    mpv_observe_property(c->mpv, 0, "dwidth",                 MPV_FORMAT_INT64);
-    mpv_observe_property(c->mpv, 0, "dheight",                MPV_FORMAT_INT64);
     mpv_observe_property(c->mpv, 0, "track-list",             MPV_FORMAT_NONE);
+    mpv_observe_property(c->mpv, 0, "media-title",            MPV_FORMAT_STRING);
+    mpv_observe_property(c->mpv, 0, "metadata",               MPV_FORMAT_NODE);
+
+    if (!audioOnly) {
+        mpv_observe_property(c->mpv, 0, "dwidth",  MPV_FORMAT_INT64);
+        mpv_observe_property(c->mpv, 0, "dheight", MPV_FORMAT_INT64);
+    } else {
+        /* Audio UIs want metadata where video UIs wanted dimensions. */
+        mpv_observe_property(c->mpv, 0, "media-title",            MPV_FORMAT_STRING);
+        mpv_observe_property(c->mpv, 0, "metadata/by-key/Artist", MPV_FORMAT_STRING);
+        mpv_observe_property(c->mpv, 0, "metadata/by-key/Album",  MPV_FORMAT_STRING);
+    }
 
     if (mpv_initialize(c->mpv) < 0) {
-        fprintf(stderr, "[AuraPlayer] mpv_initialize failed (render-api)\n");
+        fprintf(stderr, "[AuraPlayer] mpv_initialize failed (%s)\n",
+                audioOnly ? "audio-only" : "render-api");
         return;
     }
 
-    /* --- event thread: identical to initializeNative --- */
+    /* --- event thread --- */
     #ifdef _WIN32
         c->thread = (HANDLE)_beginthreadex(NULL, 0, event_loop, c, 0, NULL);
     #else
         if (pthread_create(&c->thread, NULL, event_loop, c) == 0)
             c->thread_started = 1;
     #endif
-    fprintf(stderr, "[C] initializeRenderApiNative -> ctx=%p (no wid)\n", (void *)c);
+
+    fprintf(stderr, "[C] initializeRenderApiNative -> ctx=%p (%s)\n",
+            (void *)c, audioOnly ? "audio-only" : "render-api, no wid");
     fflush(stderr);
 }
 

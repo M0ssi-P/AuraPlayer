@@ -148,7 +148,12 @@ internal object WindowsSkiaSurfaceStrategy : VideoSurfaceStrategy {
                 val producer = WindowsVideoRegistry.producerFor(player)
                 val consumer = WindowsVideoRegistry.consumerFor(player, devicePtr)
                 val wired = runCatching { WindowsVideoRegistry.ensureConsumerWired(consumer, producer, gr) }
-                    .onFailure { println("AuraPlayer: wiring failed: $it") }
+                    .onFailure {
+                        if (!consumer.warned) {
+                            consumer.warned = true
+                            println("AuraPlayer: wiring failed: $it")
+                        }
+                    }
                     .isSuccess
 
                 val i = Model2.acquireFront(player.nativeCtx)

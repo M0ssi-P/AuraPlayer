@@ -135,7 +135,12 @@ internal object MacSkiaSurfaceStrategy : VideoSurfaceStrategy {
                 val producer = MacVideoRegistry.producerFor(player)
                 val consumer = MacVideoRegistry.consumerFor(player, devicePtr)
                 val wired = runCatching { MacVideoRegistry.ensureConsumerWired(consumer, producer, gr) }
-                    .onFailure { println("AuraPlayer: wiring failed: $it") }
+                    .onFailure {
+                        if (!consumer.warned) {
+                            consumer.warned = true
+                            println("AuraPlayer: wiring failed: $it")
+                        }
+                    }
                     .isSuccess
 
                 val i = Model2.acquireFront(player.nativeCtx)
