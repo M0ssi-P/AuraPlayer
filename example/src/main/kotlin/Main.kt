@@ -49,7 +49,7 @@ fun main() {
             val player = remember { AuraPlayer() }
 
             LaunchedEffect(player) {
-                player.loadWhenReady("https://youtu.be/nPV9Fvo59L0?list=RDnPV9Fvo59L0")
+                player.loadWhenReady("https://d21kl6o5a7faj0.cloudfront.net/repo/f9c/f9cc3d4b192f7362cf697731b38ad4c9cd4bbb708df1f834a1203c190dc42f3da3ac36e691731b2ca19a46344305e631f1647e299001b10835ab4c131b278ae6.m4a")
             }
 
             AuraPlayerHost(window) {
@@ -57,7 +57,7 @@ fun main() {
                     // 3. Nest the surface anywhere, any depth. First composition
                     //    attaches the native surface and initializes mpv.
                     CompositionLocalProvider(LocalPlayerBounds provides playerCoords) {
-                        AuraPlayerSurface(
+                        AuraAudioSurface(
                             player,
                             modifier = Modifier.onGloballyPositioned { playerCoords = it }.aspectRatio(16f / 9f)
                                 .align(Alignment.CenterHorizontally),

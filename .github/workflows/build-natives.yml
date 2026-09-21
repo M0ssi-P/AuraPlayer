@@ -151,25 +151,25 @@ jobs:
               $FRAMEWORKS
           }
 
-          build_slice x86_64 "$INTEL_JAVA_HOME" libnative_render_x86.dylib
-          build_slice arm64  "${JAVA_HOME}"     libnative_render_arm.dylib
+          build_slice x86_64 "$INTEL_JAVA_HOME" native_render_x86.dylib
+          build_slice arm64  "${JAVA_HOME}"     native_render_arm.dylib
 
-          lipo -create libnative_render_x86.dylib libnative_render_arm.dylib \
-            -output "$STAGE/libnative_render.dylib"
+          lipo -create native_render_x86.dylib native_render_arm.dylib \
+            -output "$STAGE/native_render.dylib"
 
-          xattr -cr "$STAGE/libnative_render.dylib"
-          codesign --force -s - "$STAGE/libnative_render.dylib"
+          xattr -cr "$STAGE/native_render.dylib"
+          codesign --force -s - "$STAGE/native_render.dylib"
 
           # Both dylibs are universal (libmpv ships that way; native_render is
           # lipo'd above), so one folder covers Intel and Apple Silicon.
           OUT="auraplayer-core/src/main/resources/nativelibs/macos-x64"
           mkdir -p "$OUT"
-          cp "$STAGE/libnative_render.dylib" "$OUT/"
+          cp "$STAGE/native_render.dylib" "$OUT/"
           cp "$STAGE/libmpv.dylib"           "$OUT/"
 
           echo "=== Final verification ==="
-          otool -L "$STAGE/libnative_render.dylib"
-          lipo -archs "$STAGE/libnative_render.dylib"
+          otool -L "$STAGE/native_render.dylib"
+          lipo -archs "$STAGE/native_render.dylib"
 
       - name: Make Gradle Wrapper Executable
         run: chmod +x gradlew
