@@ -219,7 +219,7 @@ jobs:
             $BASE/windows-x64/libmpv-2.dll
             $BASE/windows-x64/libEGL.dll
             $BASE/windows-x64/libGLESv2.dll
-            $BASE/macos-x64/libnative_render.dylib
+            $BASE/macos-x64/native_render.dylib
             $BASE/macos-x64/libmpv.dylib
           "
           MISSING=0

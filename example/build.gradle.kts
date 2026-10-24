@@ -21,7 +21,7 @@ dependencies {
     implementation(compose.desktop.currentOs) {
         exclude(compose.material)
     }
-    api(project(":auraplayer-core"))
+    api(project(":auraplayer-core") )
     api(project(":auraplayer-compose"))
 
     testImplementation(kotlin("test"))
